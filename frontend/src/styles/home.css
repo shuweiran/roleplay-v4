@@ -16,6 +16,87 @@
   background: rgba(255, 255, 255, 0.02);
 }
 
+/* 主区域 — 你的角色 */
+.home-player-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  margin-bottom: 12px;
+  background: rgba(124, 77, 255, 0.06);
+  border: 1px solid rgba(124, 77, 255, 0.18);
+  border-radius: 10px;
+}
+
+.player-row-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #b388ff;
+  white-space: nowrap;
+}
+
+.player-row-input-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+}
+
+.player-row-input {
+  flex: 1;
+  max-width: 260px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-color, #555);
+  border-radius: 6px;
+  background: var(--input-bg, #16213e);
+  color: var(--text-color, #eee);
+  font-size: 0.9rem;
+}
+
+.player-row-input:focus {
+  outline: none;
+  border-color: #7c4dff;
+}
+
+.player-row-hint {
+  font-size: 0.75rem;
+  color: var(--text-dim, #777);
+}
+
+/* 联机模式栏 */
+.room-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  margin-bottom: 16px;
+  background: var(--card-bg, #1a1a2e);
+  border: 1px solid var(--border-color, #333);
+  border-radius: 10px;
+}
+
+.room-bar-label {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-secondary, #aaa);
+  white-space: nowrap;
+}
+
+.room-bar-input {
+  width: 110px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-color, #555);
+  border-radius: 6px;
+  background: var(--input-bg, #16213e);
+  color: var(--text-color, #eee);
+  font-size: 0.85rem;
+}
+
+.room-bar-input:focus {
+  outline: none;
+  border-color: #7c4dff;
+}
+
 .home-logo {
   display: flex;
   align-items: center;
@@ -26,7 +107,7 @@
   margin-bottom: 20px;
 }
 
-/* 玩家角色名区域 */
+/* 玩家角色名区域 — 左输入右说明 */
 .home-player-section {
   margin-bottom: 20px;
   padding: 12px 14px;
@@ -35,30 +116,34 @@
   border-radius: 10px;
 }
 
+.player-row-h {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.player-input-area {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
 .player-label {
   display: block;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   font-weight: 600;
   color: #b388ff;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   letter-spacing: 0.5px;
 }
 
-.player-input-row {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
 .player-name-input {
-  width: 100%;
-  padding: 8px 10px;
+  width: 130px;
+  padding: 6px 8px;
   border: 1px solid var(--border-color, #555);
   border-radius: 6px;
   background: var(--input-bg, #16213e);
   color: var(--text-color, #eee);
-  font-size: 0.9rem;
-  box-sizing: border-box;
+  font-size: 0.85rem;
 }
 
 .player-name-input:focus {
@@ -66,9 +151,22 @@
   border-color: #7c4dff;
 }
 
-.player-hint {
+.player-mech-area {
+  flex: 1;
+  min-width: 0;
+}
+
+.mech-title {
   font-size: 0.72rem;
-  color: var(--text-dim, #777);
+  font-weight: 600;
+  color: #888;
+  margin-bottom: 4px;
+}
+
+.mech-line {
+  font-size: 0.68rem;
+  color: #777;
+  line-height: 1.6;
 }
 
 .home-logo .brand-mark {
@@ -265,4 +363,47 @@
   font-size: 16px;
   border-radius: 10px;
   min-width: 280px;
+}
+
+/* 设置面板 */
+.home-settings-panel {
+  padding: 0 4px;
+  margin-top: 8px;
+}
+
+.settings-inline {
+  padding: 14px;
+  background: var(--card-bg, #1a1a2e);
+  border: 1px solid var(--border-color, #333);
+  border-radius: 10px;
+  margin-bottom: 8px;
+}
+
+.settings-inline-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.settings-inline-item {
+  flex: 1;
+}
+
+.settings-inline-item label {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--text-secondary, #aaa);
+  margin-bottom: 4px;
+}
+
+.settings-inline-item input,
+.settings-inline-item select {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border-color, #555);
+  border-radius: 6px;
+  background: var(--input-bg, #16213e);
+  color: var(--text-color, #eee);
+  font-size: 0.85rem;
+  box-sizing: border-box;
 }

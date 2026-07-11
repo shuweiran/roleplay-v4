@@ -34,6 +34,9 @@ export function ScenePage() {
   const [scriptPrompt, setScriptPrompt] = useState('');
   const [scriptJson] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [joinCode, setJoinCode] = useState('');
+  const [roomBusy, setRoomBusy] = useState(false);
+  const [roomError, setRoomError] = useState('');
   const [roleConfig, setRoleConfig] = useState<Record<string, number>>({
     wolf: 1, seer: 1, witch: 1, hunter: 0, villager: 2,
   });
@@ -163,6 +166,43 @@ export function ScenePage() {
     } catch (e: any) { setStatus(e.message || '进入失败'); }
   };
 
+  const createRoom = async () => {
+    setRoomBusy(true);
+    setRoomError('');
+    try {
+      await store.createRoom(currentPlayer);
+    } catch (e: any) {
+      setRoomError(e.message || '创建房间失败');
+    } finally {
+      setRoomBusy(false);
+    }
+  };
+
+  const joinRoom = async () => {
+    if (!joinCode.trim()) return;
+    setRoomBusy(true);
+    setRoomError('');
+    try {
+      await store.joinRoom(joinCode, currentPlayer);
+    } catch (e: any) {
+      setRoomError(e.message || '加入房间失败');
+    } finally {
+      setRoomBusy(false);
+    }
+  };
+
+  const leaveRoom = async () => {
+    setRoomBusy(true);
+    setRoomError('');
+    try {
+      await store.leaveRoom();
+    } catch (e: any) {
+      setRoomError(e.message || '离开房间失败');
+    } finally {
+      setRoomBusy(false);
+    }
+  };
+
   // Script generation
   const genScript = async () => {
     setStatus('剧本杀模式正在开发中，敬请期待');
@@ -189,7 +229,7 @@ export function ScenePage() {
 
   return (
     <div className="setup-page">
-      <div className="panel" style={{ width: 900, border: 0, borderRadius: 12, padding: 32 }}>
+      <div className="panel" style={{ maxWidth: 960, margin: '0 auto', border: 0, borderRadius: 12, padding: 32, gridColumn: '1 / -1', width: '100%' }}>
         <div className="section-row" style={{ marginBottom: 24 }}>
           <h2 style={{ margin: 0 }}>{isRulesMode ? '规则模式' : '场景设置'}</h2>
           <div style={{ display: 'flex', gap: 8 }}>
@@ -211,7 +251,32 @@ export function ScenePage() {
                   <button className="btn btn-small btn-primary" onClick={openNewChar}>+ 新建</button>
                 </div>
               </div>
-              <div className="grid-list" style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              <div className="grid-list char-grid">
+                {/* Me 角色卡 — 2x2 大小，可点击可选择 */}
+                {(() => {
+                  const meSel = selected.has(currentPlayer);
+                  return (
+                    <button className={`char-card me-char-card ${meSel ? 'selected' : ''}`}
+                      onClick={() => toggleCharacter(currentPlayer)}
+                    >
+                      <div className="me-char-content">
+                        <div className="char-avatar me-avatar">你</div>
+                        <div className="char-info" style={{ flex: 1 }}>
+                          <div className="char-name" style={{ marginBottom: 4 }}>
+                            {currentPlayer || '你的角色'}
+                          </div>
+                          <input
+                            className="me-char-input"
+                            value={currentPlayer}
+                            onChange={e => { store.setCurrentPlayer(e.target.value); }}
+                            placeholder="输入角色名"
+                            onClick={e => e.stopPropagation()}
+                          />
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })()}
                 {characters.map(ch => {
                   const sel = selected.has(ch.name);
                   const isDefault = WEREWOLF_DEFAULTS.includes(ch.name);
@@ -242,11 +307,12 @@ export function ScenePage() {
           <>
             <section className="panel" style={{ border: 0, borderRadius: 8, marginTop: 24 }}>
               <div className="panel-body">
-                <div className="section-row" style={{ marginBottom: 12 }}>
-                  <div className="label" style={{ fontSize: 15, fontWeight: 600 }}>场景</div>
-                  <button className="btn btn-small btn-primary" onClick={openNewScene}>+ 新建</button>
-                </div>
-                <div className="grid-list">
+                <div className="section" style={{ marginBottom: 12 }}>
+                  <div className="section-row" style={{ marginBottom: 12 }}>
+                    <div className="label" style={{ fontSize: 15, fontWeight: 600 }}>场景</div>
+                    <button className="btn btn-small btn-primary" onClick={openNewScene}>+ 新建</button>
+                  </div>
+                  <div className="grid-list">
                   {scenes.map((scene: Scene) => (
                     <button key={scene.scene_id}
                       className={`item-card ${activeScene?.scene_id === scene.scene_id ? 'selected' : ''}`}
@@ -267,6 +333,7 @@ export function ScenePage() {
                     <div className="muted" style={{ padding: 16, fontSize: 13, textAlign: 'center' }}>还没有场景，点击"+ 新建"创建</div>
                   )}
                 </div>
+              </div>
               </div>
             </section>
 
@@ -292,6 +359,33 @@ export function ScenePage() {
 
               {rulesTab === 'ww' && (
                 <div>
+                  {/* 联机区域 */}
+                  <div className="ww-room-section">
+                    <div className="ww-room-header">
+                      <span className="ww-room-title">🌐 联机模式</span>
+                      {roomCode && <span className="status-pill good">房间 {roomCode}</span>}
+                    </div>
+                    <div className="ww-room-row">
+                      <div className="ww-room-players">
+                        <span className="ww-room-label">在线玩家</span>
+                        <div className="ww-room-chip-list">
+                          {onlinePlayers.length > 0 ? onlinePlayers.map(name => (
+                            <span key={name} className={`chip ${name === currentPlayer ? 'selected' : ''}`}>
+                              {name}{name === currentPlayer ? ' · 我' : ''}
+                            </span>
+                          )) : <span className="ww-room-empty">（仅自己）</span>}
+                        </div>
+                      </div>
+                      <div className="ww-room-actions">
+                        <input value={joinCode} onChange={e => setJoinCode(e.target.value.toUpperCase())} placeholder="房间码" className="ww-room-input" />
+                        <button className="btn btn-sm" disabled={roomBusy || !joinCode.trim()} onClick={joinRoom}>加入</button>
+                        <button className="btn btn-sm btn-primary" disabled={roomBusy} onClick={createRoom}>创建房间</button>
+                        {roomCode && <button className="btn btn-sm btn-danger" disabled={roomBusy} onClick={leaveRoom}>离开</button>}
+                      </div>
+                    </div>
+                    {roomError && <div className="status-pill warn" style={{marginTop:8}}>{roomError}</div>}
+                  </div>
+
                   <p style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 8 }}>
                     选择5个以上角色即可开始。默认角色（苏哲、林诗、老王、小美、阿强）自动选中。
                     {missingDefaults.length > 0 && (

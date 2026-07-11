@@ -1,0 +1,19 @@
+{
+  "codes": [
+    {
+      "code": "DK4HNGAF",
+      "created": "2026-07-11T12:13:42.162971",
+      "expires": "2026-08-10T12:13:42.162955",
+      "max_uses": 1,
+      "used_count": 1,
+      "used_by": [
+        {
+          "user_id": "user_d9da51547c646a06",
+          "time": "2026-07-11T12:14:00.548936"
+        }
+      ],
+      "note": "",
+      "active": true
+    }
+  ]
+}

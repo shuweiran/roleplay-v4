@@ -21,11 +21,24 @@ export function HomePage() {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadErr, setLoadErr] = useState('');
-  const [playerName, setPlayerName] = useState(store.currentPlayer);
-  const [joinCode, setJoinCode] = useState(store.roomCode);
-  const [roomBusy, setRoomBusy] = useState(false);
+  const playerName = store.currentPlayer;
+  const [showSettings, setShowSettings] = useState(false);
+  const [apiKey, setApiKey] = useState('');
+  const [apiBase, setApiBase] = useState('https://api.deepseek.com');
+  const [model, setModel] = useState('deepseek-chat');
+  const [language, setLanguage] = useState('zh');
+  const [settingsMsg, setSettingsMsg] = useState('');
 
   useEffect(() => { loadSessions(); }, []);
+
+  useEffect(() => {
+    api.getApiKeyConfig().then(d => {
+      if (d.api_base) setApiBase(d.api_base);
+      if (d.model) setModel(d.model);
+      if (d.language) setLanguage(d.language);
+      setApiKey('');  // API key stays empty in UI (secret)
+    }).catch(() => {});
+  }, []);
 
   const loadSessions = async () => {
     setLoading(true);
@@ -54,23 +67,14 @@ export function HomePage() {
     goToView('scene');
   };
 
-  const createRoom = async () => {
-    setRoomBusy(true);
-    try { await store.createRoom(playerName); }
-    finally { setRoomBusy(false); }
-  };
-
-  const joinRoom = async () => {
-    if (!joinCode.trim()) return;
-    setRoomBusy(true);
-    try { await store.joinRoom(joinCode, playerName); }
-    finally { setRoomBusy(false); }
-  };
-
-  const leaveRoom = async () => {
-    setRoomBusy(true);
-    try { await store.leaveRoom(); }
-    finally { setRoomBusy(false); }
+  const handleSaveSettings = async () => {
+    try {
+      await api.setApiKeyConfig(apiKey, apiBase, model, language);
+      setSettingsMsg('设置已保存');
+      setTimeout(() => setSettingsMsg(''), 2000);
+    } catch (e: any) {
+      setSettingsMsg('保存失败: ' + (e.message || ''));
+    }
   };
 
   const experiences = [
@@ -94,20 +98,6 @@ export function HomePage() {
         <div className="home-logo">
           <div className="brand-mark">R</div>
           <span>Roleplay v4</span>
-        </div>
-
-        {/* 玩家角色名 — 显眼位置 */}
-        <div className="home-player-section">
-          <label className="player-label">🎭 你的角色</label>
-          <div className="player-input-row">
-            <input
-              className="player-name-input"
-              value={playerName}
-              onChange={e => { setPlayerName(e.target.value); store.setCurrentPlayer(e.target.value); }}
-              placeholder="输入你的角色名，如 me"
-            />
-            <span className="player-hint">me = 以你本人身份参与对话</span>
-          </div>
         </div>
 
         <div className="home-recent-list">
@@ -147,30 +137,8 @@ export function HomePage() {
           <h1>创建故事</h1>
           <p>你想怎么开始？</p>
         </div>
-        <div className="room-panel">
-          <div className="room-panel-head">
-            <div>
-              <div className="room-title">联机房间</div>
-              <div className="room-subtitle">同一房间的玩家会作为真人角色加入狼人杀</div>
-            </div>
-            {store.roomCode && <span className="status-pill good">房间 {store.roomCode}</span>}
-          </div>
-          <div className="room-row">
-            <input value={playerName} onChange={e => setPlayerName(e.target.value)} placeholder="你的玩家名，如 me / 小王" />
-            <button className="btn btn-primary" disabled={roomBusy || !playerName.trim()} onClick={createRoom}>创建房间</button>
-            <input value={joinCode} onChange={e => setJoinCode(e.target.value.toUpperCase())} placeholder="房间码" style={{ width: 110 }} />
-            <button className="btn" disabled={roomBusy || !joinCode.trim()} onClick={joinRoom}>加入</button>
-            {store.roomCode && <button className="btn btn-danger" disabled={roomBusy} onClick={leaveRoom}>离开</button>}
-          </div>
-          {store.roomCode && (
-            <div className="room-players">
-              {(store.onlinePlayers.length ? store.onlinePlayers : [store.currentPlayer]).map(name => (
-                <span key={name} className={`chip ${name === store.currentPlayer ? 'selected' : ''}`}>{name}{name === store.currentPlayer ? ' · 我' : ''}</span>
-              ))}
-            </div>
-          )}
-          {store.roomError && <div className="status-pill warn">{store.roomError}</div>}
-        </div>
+
+
         <div className="experience-cards">
           {experiences.map(exp => (
             <button
@@ -187,6 +155,41 @@ export function HomePage() {
             </button>
           ))}
         </div>
+        {/* 展开式设置面板 */}
+        <div className="home-settings-panel">
+          <button className="btn btn-text" onClick={() => setShowSettings(!showSettings)} style={{ marginBottom: 8 }}>
+            {showSettings ? '收起设置 ▲' : '⚙️ 展开设置 ▼'}
+          </button>
+          
+          {showSettings && (
+            <div className="settings-inline">
+              <div className="settings-inline-row">
+                <div className="settings-inline-item">
+                  <label>🔑 API Key</label>
+                  <input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="sk-... 或你的 API Key" />
+                </div>
+                <div className="settings-inline-item">
+                  <label>🌐 API 地址</label>
+                  <input value={apiBase} onChange={e => setApiBase(e.target.value)} placeholder="https://api.deepseek.com" />
+                </div>
+                <div className="settings-inline-item">
+                  <label>🧠 模型</label>
+                  <input value={model} onChange={e => setModel(e.target.value)} placeholder="deepseek-chat" />
+                </div>
+                <div className="settings-inline-item">
+                  <label>🔤 语言</label>
+                  <select value={language} onChange={e => setLanguage(e.target.value)}>
+                    <option value="zh">中文</option>
+                    <option value="en">English</option>
+                  </select>
+                </div>
+              </div>
+              <button className="btn btn-sm btn-primary" onClick={handleSaveSettings}>保存设置</button>
+              <span style={{ marginLeft: 8, fontSize: 12, color: '#888' }}>{settingsMsg}</span>
+            </div>
+          )}
+        </div>
+
         <div className="home-start">
           <button className="btn btn-primary btn-large" disabled={!selectedMode} onClick={handleStart}>
             {selectedMode ? `进入${experiences.find(e => e.id === selectedMode)?.title || ''}` : '请选择一种模式'}
