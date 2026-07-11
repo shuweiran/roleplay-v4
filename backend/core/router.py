@@ -941,6 +941,17 @@ class Router(WerewolfGameMixin):
 
     async def _configure_tracks(self) -> TrackConfig:
         """Arbiter configures this round's tracks."""
+        # 静默处理上一轮遗留的待审批轨道变更申请
+        from .track_request import request_manager, RequestType
+        self._process_pending_track_requests()
+
+        # 记录上一轮的轨道分配，用于后续对比检测角色轨道变化
+        self._prev_track_modes: dict = {}
+        if self.current_track_config:
+            for t in self.current_track_config.tracks:
+                for agent_name in t.agents:
+                    self._prev_track_modes[agent_name] = t.mode
+
         # Werewolf mode: use LLM arbiter like free mode, with game state context
         if self.config.mode.mode == "werewolf" and self._werewolf_state:
             if self.arbiter:
@@ -1026,6 +1037,25 @@ class Router(WerewolfGameMixin):
             for track in tracks:
                 if "me" in track.agents and hasattr(track, 'agent_actions'):
                     track.agent_actions["me"] = "silent"
+
+        # 检测角色自主轨道变更：对比上一轮和本轮，记录为角色自主申请+已批准
+        new_modes: dict = {}
+        for t in tracks:
+            for agent_name in t.agents:
+                new_modes[agent_name] = t.mode
+        for agent_name, new_mode in new_modes.items():
+            old_mode = self._prev_track_modes.get(agent_name)
+            if old_mode and old_mode != new_mode:
+                req = request_manager.submit_request(
+                    agent_name=agent_name,
+                    target_agent="",
+                    current_mode=old_mode,
+                    target_mode=new_mode,
+                    reason="角色自主判断需要调整轨道",
+                )
+                # 主控已在本轮批准该变更，标记为已批
+                if req.status.value == "pending":
+                    request_manager.approve_request(req.id, "主控自动批准（已执行）")
 
         tc = TrackConfig(tracks=tracks, round=self.current_round, description=reasoning)
         self.current_track_config = tc
@@ -1859,6 +1889,34 @@ class Router(WerewolfGameMixin):
 
     def get_goals(self) -> List[str]:
         return self.goals
+
+    # ================================================================
+    # Silent Track Request System (角色自主申请，主控后台静默审批)
+    # ================================================================
+
+    def _process_pending_track_requests(self) -> None:
+        """静默处理所有待审批的轨道变更申请。
+        不显示在前端，不写入对话上下文。
+        """
+        from .track_request import request_manager, RequestStatus
+        pending = request_manager.get_pending_requests()
+        if not pending:
+            return
+
+        for req in pending:
+            # 根据剧情目标自动判断
+            goals = self.goals
+            goals_text = ", ".join(goals) if goals else "无明确目标"
+            request_manager.approve_request(req.id, f"符合剧情目标: {goals_text}")
+
+            # 静默应用轨道变更
+            if hasattr(self, 'track_manager') and self.track_manager:
+                tracks = self.track_manager.list_by_agent(req.agent_name)
+                for track in tracks:
+                    if req.agent_name in track.members:
+                        track.members.discard(req.agent_name)
+                        track.agent_actions.pop(req.agent_name, None)
+                        self._emit("track_updated", track.to_dict())
 
     # ================================================================
     # State

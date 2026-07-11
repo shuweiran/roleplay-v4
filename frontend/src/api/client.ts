@@ -1,4 +1,4 @@
-﻿const BASE = '';
+const BASE = '';
 
 const _controllers = new Map<number, AbortController>();
 let _id = 0;
@@ -97,3 +97,4 @@ export const api = {
     request<any>('/api/config/apikey', { method: 'POST', body: JSON.stringify({ api_key: apiKey, api_base: apiBase || '', model: model || '' }) }),
   getModelRecommendations: () => request<any>('/api/config/models'),
 };
+

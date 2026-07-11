@@ -34,6 +34,7 @@ from .routes_auth import router as auth_router
 from .routes_room import router as room_router
 from .routes_voice import router as voice_router
 from .routes_config import router as config_router
+from .routes_track import router as track_router
 
 
 @asynccontextmanager
@@ -117,6 +118,7 @@ def create_app(config: AppConfig = None) -> FastAPI:
     app.include_router(room_router)
     app.include_router(voice_router)
     app.include_router(config_router)
+    app.include_router(track_router)
 
     # Static files / SPA
     roleplay_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
