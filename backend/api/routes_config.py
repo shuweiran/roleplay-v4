@@ -118,3 +118,22 @@ async def set_api_key(req: ApiKeyRequest, request: Request):
 async def get_model_recommendations():
     """Get model recommendations with descriptions."""
     return {"models": MODEL_RECOMMENDATIONS}
+
+
+class VoiceConfigRequest(BaseModel):
+    voice_enabled: bool = True
+
+
+@router.get("/voice")
+async def get_voice_config(request: Request):
+    r = getattr(request.app.state, "router", None)
+    enabled = getattr(r, "voice_enabled", True) if r else True
+    return {"voice_enabled": enabled}
+
+
+@router.post("/voice")
+async def set_voice_config(req: VoiceConfigRequest, request: Request):
+    r = getattr(request.app.state, "router", None)
+    if r:
+        r.voice_enabled = req.voice_enabled
+    return {"status": "ok", "voice_enabled": req.voice_enabled}

@@ -267,6 +267,7 @@ function MessageView({ msg }: { msg: AppMessage }) {
 export function ChatPage() {
   const store = useAppStore();
   const [goalInput, setGoalInput] = useState('');
+const [voiceEnabled, setVoiceEnabled] = useState(true);
   const [userInput, setUserInput] = useState('');
   const [showDirector, setShowDirector] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -467,6 +468,25 @@ export function ChatPage() {
                     <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                       <button className={`actor-chip ${active ? 'selected' : ''}`} onClick={() => store.setHistoryFilter(active ? null : name)}>
                         {name}
+                      </button>
+                      <button className="btn btn-small btn-icon"
+                        onClick={async () => {
+                          const newVal = !voiceEnabled;
+                          setVoiceEnabled(newVal);
+                          await fetch('/api/voice/toggle', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ voice_enabled: newVal }),
+                          });
+                        }}
+                        style={{
+                          padding: '0 4px', fontSize: 11, lineHeight: '20px', height: 20,
+                          color: voiceEnabled ? '#7c4dff' : '#888',
+                          background: voiceEnabled ? '#7c4dff22' : 'transparent',
+                          border: '1px solid ' + (voiceEnabled ? '#7c4dff55' : '#444'),
+                        }}
+                        title={voiceEnabled ? '关闭语音' : '开启语音'}>
+                        {voiceEnabled ? '🔊' : '🔇'}
                       </button>
                       <button className="btn btn-small btn-icon"
                         onClick={() => handleRemoveAgent(name)}

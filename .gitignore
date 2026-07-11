@@ -27,6 +27,8 @@ Thumbs.db
 # Runtime data (exclude sessions, track default characters/scenes)
 backend/data/sessions/
 backend/data/namespaces/
+backend/data/characters/
+backend/data/scenes/
 *.log
 server.log
 server_err.log

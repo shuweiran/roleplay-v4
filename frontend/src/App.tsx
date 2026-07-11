@@ -28,13 +28,21 @@ export default function App() {
     switch (eventType) {
       case 'round_start': {
         store.setCurrentRound(data.round);
-        store.addSystemMsg(`第 ${data.round} 轮开始`);
+        const rs = useAppStore.getState();
+        const smallMode = rs.mode === 'free' || rs.mode === 'director';
+        if (!(smallMode && rs.agents.length < 3)) {
+          store.addSystemMsg(`第 ${data.round} 轮开始`);
+        }
         break;
       }
       case 'arbiter_task': {
         // Hide task assignments in werewolf mode (reveals player identities)
-        const state = useAppStore.getState();
-        if (state.mode !== 'werewolf' && data.tasks?.length) store.addTaskBlock(data.tasks);
+        // Also suppress task distribution for <3 agents in free/director mode
+        const at = useAppStore.getState();
+        const smallMode = at.mode === 'free' || at.mode === 'director';
+        if (!(smallMode && at.agents.length < 3)) {
+          if (at.mode !== 'werewolf' && data.tasks?.length) store.addTaskBlock(data.tasks);
+        }
         break;
       }
       case 'agent_output': {
@@ -48,13 +56,23 @@ export default function App() {
         break;
       }
       case 'arbiter_integrate': {
-        if (data.narration) store.addIntegration(data.narration);
+        if (data.narration) {
+          const ai = useAppStore.getState();
+          const sm = ai.mode === 'free' || ai.mode === 'director';
+          if (!(sm && ai.agents.length < 3)) {
+            store.addIntegration(data.narration);
+          }
+        }
         break;
       }
       case 'round_complete': {
         store.setCurrentRound(data.round);
         store.setRunning(false);
-        store.addSystemMsg(`第 ${data.round} 轮完成`);
+        const rc = useAppStore.getState();
+        const smallMode2 = rc.mode === 'free' || rc.mode === 'director';
+        if (!(smallMode2 && rc.agents.length < 3)) {
+          store.addSystemMsg(`第 ${data.round} 轮完成`);
+        }
         break;
       }
       case 'compression': {
@@ -71,7 +89,8 @@ export default function App() {
           store.addAgentMsg(data.character, data.content, 'day_vote', '', 'merged');
           store.setWerewolfWaitHuman(false);
         } else if (data.category === 'human_speech' && data.character) {
-          store.addAgentMsg(data.character, data.content, 'main', '', 'merged');
+          // Skip — loadHistory handles display to avoid duplicates
+          break;
         } else if (data.content?.startsWith?.('[系统] 狼人已选择')
                 || data.content?.startsWith?.('[系统] 你已选择')
                 || data.content?.startsWith?.('[系统] 你已使用')) {

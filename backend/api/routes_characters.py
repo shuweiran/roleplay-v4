@@ -50,13 +50,18 @@ async def update_character(name: str, req: CharacterUpdateRequest, request: Requ
         voice=req.voice if req.voice is not None else old_persona.voice,
         background=req.background if req.background is not None else old_persona.background,
     )
-    try:
-        router.save_character(persona)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    # Atomic update: write new first, then delete old
+    router._saved_characters[new_name] = persona
+    if router._char_store:
+        if new_name != name:
+            router._char_store.update(name, persona.to_dict())
+        else:
+            router._char_store.save(persona.to_dict())
     if new_name != name:
-        router.delete_character(name)
+        del router._saved_characters[name]
     if was_active:
+        if name in router.agents:
+            del router.agents[name]
         router.agents[new_name] = Agent(
             persona, new_name, llm_client=get_llm_client(request),
             llm_config=router.config.llm, monitor=router.monitor

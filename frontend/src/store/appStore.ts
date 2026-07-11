@@ -55,7 +55,7 @@ interface AppState {
 
   loadState: () => Promise<void>;
   loadHistory: () => Promise<void>;
-  enterScene: (sceneId: string, agentNames: string[]) => Promise<void>;
+  enterScene: (sceneId: string, agentNames: string[], currentPlayer?: string) => Promise<void>;
   goToView: (v: 'home' | 'scene' | 'config' | 'chat') => void;
   goChat: () => void;
   goConfig: () => void;
@@ -255,7 +255,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  enterScene: async (sceneId, agentNames) => {
+  enterScene: async (sceneId, agentNames, currentPlayer) => {
     // If the scene doesn't exist in the backend, create it first
     const storeState = get();
     const sceneExists = storeState.scenes.some((s: any) => s.scene_id === sceneId);
@@ -267,7 +267,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         agent_names: agentNames,
       });
     }
-    const data = await api.startScene(sceneId, agentNames);
+    const data = await api.startScene(sceneId, agentNames, currentPlayer);
     const state = await api.getState();
     set({
       view: 'chat',

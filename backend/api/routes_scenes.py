@@ -60,17 +60,30 @@ async def enter_scene(scene_id: str, request: Request):
 
 
 @router.post("/scenes/{scene_id}/start")
-async def start_scene(scene_id: str, agents: str = "", request: Request = None):
+async def start_scene(scene_id: str, agents: str = "", me: str = "", request: Request = None):
     agent_names = [n.strip() for n in agents.split(",") if n.strip()]
     if not agent_names:
         raise HTTPException(status_code=400, detail="请至少选择一个角色")
 
     old_router = get_router(request)
+    dc = me.strip() if me else ""
     personas = []
     for name in agent_names:
-        if name not in old_router._saved_characters:
-            raise HTTPException(status_code=404, detail=f"角色 '{name}' 不存在")
-        personas.append(old_router._saved_characters[name])
+        if name == dc:
+            from ..core.persona import Persona
+            personas.append(Persona(name=name, persona=f"扮演{name}。用第一人称说话。", voice=""))
+        elif name not in old_router._saved_characters:
+            # Extra debug: check what config looks like
+            import sys
+            cfg_m = request.app.state.config.mode if hasattr(request.app.state, 'config') else None
+            cfg_dc2 = cfg_m.director_character if cfg_m else 'NO_CONFIG'
+            cfg_m2 = cfg_m.mode if cfg_m else 'NO_MODE'
+            raise HTTPException(
+                status_code=404,
+                detail=f"角色 '{name}' 不存在 (dc='{dc}', has_cfg={has_cfg}, agents={agent_names}, config_dc='{cfg_dc2}', mode='{cfg_m2}')"
+            )
+        else:
+            personas.append(old_router._saved_characters[name])
 
     llm_client = get_llm_client(request)
     char_store = get_character_store(request)
@@ -82,13 +95,24 @@ async def start_scene(scene_id: str, agents: str = "", request: Request = None):
         config.mode.mode = old_router.config.mode.mode
         config.mode.protagonist = old_router.config.mode.protagonist
         config.mode.director_character = old_router.config.mode.director_character
+        # Override with me query param if provided (handles rename)
+        if me:
+            config.mode.director_character = me
+        # Session isolation: clear director if me card not in this session
+        if config.mode.director_character and config.mode.director_character not in agent_names:
+            config.mode.director_character = ''
+            if config.mode.mode == 'director':
+                config.mode.mode = 'free'
     new_router = CoreRouter(
         config=config, llm_client=llm_client,
         character_store=char_store, scene_store=scene_store,
         session_manager=session_mgr)
+    if old_router:
+        new_router.voice_enabled = getattr(old_router, 'voice_enabled', True)
 
     for p in personas:
-        new_router.save_character(p)
+        if p.name != dc:
+            new_router.save_character(p)
 
     await new_router.init_with_characters(personas, scene_id=scene_id)
     # Auto-create scene if it doesn't exist (e.g. werewolf_default)

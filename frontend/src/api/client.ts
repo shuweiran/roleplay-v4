@@ -60,8 +60,8 @@ export const api = {
   deleteScene: (id: string) => request<any>(`/api/scenes/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   generateScene: (keywords: string) => request<any>('/api/scenes/generate', { method: 'POST', body: JSON.stringify({ keywords }) }),
   generateCharacter: (keywords: string) => request<any>('/api/characters/generate', { method: 'POST', body: JSON.stringify({ keywords }) }),
-  startScene: (sceneId: string, agents: string[]) =>
-    request<any>(`/api/scenes/${encodeURIComponent(sceneId)}/start?agents=${encodeURIComponent(agents.join(','))}`, { method: 'POST' }),
+  startScene: (sceneId: string, agents: string[], me?: string) =>
+    request<any>(`/api/scenes/${encodeURIComponent(sceneId)}/start?agents=${encodeURIComponent(agents.join(','))}${me ? `&me=${encodeURIComponent(me)}` : ''}`, { method: 'POST' }),
   startRound: (turns: number = 1) => request<any>('/api/round/start', { method: 'POST', body: JSON.stringify({ turns }) }),
   rollback: (round: number) => request<any>('/api/round/rollback', { method: 'POST', body: JSON.stringify({ round }) }),
   send: (text: string, playerName?: string) => request<any>('/api/send', { method: 'POST', body: JSON.stringify({ text, player_name: playerName || '' }) }),
@@ -96,5 +96,7 @@ export const api = {
   setApiKeyConfig: (apiKey: string, apiBase?: string, model?: string, language?: string, trackActivity?: string) =>
     request<any>('/api/config/apikey', { method: 'POST', body: JSON.stringify({ api_key: apiKey, api_base: apiBase || '', model: model || '', language: language || 'zh', track_activity: trackActivity || 'auto' }) }),
   getModelRecommendations: () => request<any>('/api/config/models'),
+  getVoiceConfig: () => request<any>('/api/config/voice'),
+  setVoiceConfig: (voiceEnabled: boolean) => request<any>('/api/config/voice', { method: 'POST', body: JSON.stringify({ voice_enabled: voiceEnabled }) }),
 };
 

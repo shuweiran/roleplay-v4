@@ -131,7 +131,13 @@ export function ScenePage() {
     try {
       const humanPlayers = roomPlayers;
       const scenePlayers = Array.from(new Set([...selectedNames, ...humanPlayers]));
-      await enterScene(activeScene.scene_id, scenePlayers);
+      // Check if user's character is selected (me card)
+      const hasMe = selectedNames.includes(currentPlayer);
+      if (hasMe && mode !== 'werewolf') {
+        // Set director mode first BEFORE entering scene
+        await setMode('director', '', currentPlayer);
+      }
+      await enterScene(activeScene.scene_id, scenePlayers, currentPlayer);
       if (mode === 'werewolf') {
         setStatus('正在初始化狼人杀...');
         await setMode('werewolf', '', currentPlayer);
@@ -151,7 +157,7 @@ export function ScenePage() {
     if (names.length < 5) { setStatus('至少需要5个角色，当前已选' + names.length + '个'); return; }
     setStatus('正在进入狼人杀...');
     try {
-      await enterScene('werewolf_default', names);
+      await enterScene('werewolf_default', names, currentPlayer);
       const humanPlayers = roomPlayers;
       await setMode('werewolf', '', currentPlayer);
       // Pass role config as query params: &wolf=2&seer=1...
@@ -256,7 +262,7 @@ export function ScenePage() {
                 {(() => {
                   const meSel = selected.has(currentPlayer);
                   return (
-                    <button className={`char-card me-char-card ${meSel ? 'selected' : ''}`}
+                    <button type="button" className={`char-card me-char-card ${meSel ? 'selected' : ''}`}
                       onClick={() => toggleCharacter(currentPlayer)}
                     >
                       <div className="me-char-content">
@@ -268,9 +274,22 @@ export function ScenePage() {
                           <input
                             className="me-char-input"
                             value={currentPlayer}
-                            onChange={e => { store.setCurrentPlayer(e.target.value); }}
+                            onChange={e => {
+                              const oldName = currentPlayer;
+                              store.setCurrentPlayer(e.target.value);
+                              const newName = e.target.value;
+                              // Sync selected set: remove old, add new
+                              setSelected(prev => {
+                                const n = new Set(prev);
+                                if (oldName && n.has(oldName)) {
+                                  n.delete(oldName);
+                                  if (newName.trim()) n.add(newName.trim());
+                                }
+                                return n;
+                              });
+                            }}
                             placeholder="输入角色名"
-                            onClick={e => e.stopPropagation()}
+                            onFocus={() => { /* don't interfere */ }}
                           />
                         </div>
                       </div>

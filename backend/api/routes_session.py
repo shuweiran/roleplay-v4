@@ -3,6 +3,7 @@
 import asyncio
 
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
 
 from ..core.persona import Persona
 from ..core.router import Router
@@ -471,6 +472,29 @@ async def voice_transcribe(request: Request):
     text = await transcribe_audio(audio_bytes)
     
     return {"text": text, "status": "ok"}
+
+
+# Global voice_enabled flag (stored on app.state for persistence)
+_VOICE_ENABLED = True
+
+
+@router.get("/voice/toggle")
+async def get_voice_toggle(request: Request):
+    global _VOICE_ENABLED
+    return {"voice_enabled": getattr(request.app.state, '_voice_enabled', True)}
+
+
+class VoiceToggleRequest(BaseModel):
+    voice_enabled: bool = True
+
+
+@router.post("/voice/toggle")
+async def set_voice_toggle(req: VoiceToggleRequest, request: Request):
+    request.app.state._voice_enabled = req.voice_enabled
+    if hasattr(request.app.state, 'router') and request.app.state.router:
+        request.app.state.router.voice_enabled = req.voice_enabled
+    return {"status": "ok", "voice_enabled": req.voice_enabled}
+
 
 @router.post("/script/generate")
 async def script_generate(req: ScriptGenerateRequest, request: Request):

@@ -110,7 +110,7 @@ class Router(WerewolfGameMixin):
         self._scene_store = scene_store
         self._session_manager = session_manager or SessionManager("data/sessions")
         self.monitor = monitor or Monitor()
-        
+        self.voice_enabled = True
 
         # Memory
         self.memory = MemoryStore(
@@ -1225,7 +1225,6 @@ class Router(WerewolfGameMixin):
         if not self.arbiter:
             all_names = list(self.agents.keys())
             tracks = []
-            # 一般模式：≥3人自动加主控
             if self.config.mode.mode == "free" and len(all_names) >= 3:
                 narrator_track = Track(
                     id="narrator", agents=["主控"],
@@ -1233,10 +1232,12 @@ class Router(WerewolfGameMixin):
                     mode="merged", label="主控视角", color="#FFB300",
                 )
                 tracks.append(narrator_track)
-            # Free mode: human player "me" should be silent (AI doesn't generate for them)
             actions = {n: "active" for n in all_names}
             if self.config.mode.mode == "free" and "me" in actions:
                 actions["me"] = "silent"
+            dc = self.config.mode.director_character
+            if dc and dc in actions and self.config.mode.mode in ("director", "werewolf", "script"):
+                actions[dc] = "silent"
             main_track = Track(id="main", agents=all_names,
                           agent_actions=actions,
                           mode="merged", label="主线", color=TRACK_COLORS[0])
@@ -1273,6 +1274,11 @@ class Router(WerewolfGameMixin):
                         track.mode = "merged"
                     if hasattr(track, 'agent_actions'):
                         track.agent_actions[dc] = "silent"
+        # Free mode: user's director character (if set) should also be silent
+        if self.config.mode.mode == "free" and dc and dc != "系统" and dc in self.agents:
+            for track in tracks:
+                if dc in track.agents and hasattr(track, 'agent_actions'):
+                    track.agent_actions[dc] = "silent"
         # Free mode: human player "me" should always be silent
         if self.config.mode.mode == "free" and "me" in self.agents:
             for track in tracks:
@@ -1345,9 +1351,10 @@ class Router(WerewolfGameMixin):
 
         dc = self.config.mode.director_character
         is_director = self.config.mode.mode in ("director", "werewolf")
+        is_free_with_user = (self.config.mode.mode == "free" and dc and dc != "系统")
 
         if not self.current_track_config:
-            agents = [n for n in self.agents if not (is_director and n == dc)]
+            agents = [n for n in self.agents if not (is_director and n == dc) and not (is_free_with_user and n == dc)]
             return [{"agent_name": n, "task": base} for n in agents]
 
         tasks = []
@@ -1360,12 +1367,12 @@ class Router(WerewolfGameMixin):
             elif track.mode == "isolated":
                 track_scope = "你处于隔离轨道，只依据自己可见的上下文行动。"
             for name, action in track.agent_actions.items():
-                if action == "active" and not (is_director and name == dc):
+                if action == "active" and not (is_director and name == dc) and not (is_free_with_user and name == dc):
                     task_text = f"{base}。{track_scope}只写{name}自己的台词、动作和判断。"
                     if name in overlong_agents:
                         task_text += f"注意：上一轮你的发言过长（{overlong_agents[name]}字），本轮请控制在500字以内，保持简洁有力。"
                     tasks.append({"agent_name": name, "task": task_text})
-        return tasks or [{"agent_name": n, "task": base} for n in self.agents if not (is_director and n == dc)]
+        return tasks or [{"agent_name": n, "task": base} for n in self.agents if not (is_director and n == dc) and not (is_free_with_user and n == dc)]
 
     # ================================================================
     # Agent execution
@@ -1584,12 +1591,8 @@ class Router(WerewolfGameMixin):
                                 "track_mode": track.mode,
                                 "visible_to": visible_to,
                             })
-                            # 流式 TTS：根据上下文选择后端
-                            # me+单角色对话 → Edge (低延迟流式)
-                            # 多角色/旁白 → CosyVoice (高音质)
-                            if content and len(content) > 5:
+                            if content and len(content) > 5 and getattr(self, 'voice_enabled', True):
                                 lang = getattr(self.config.mode, 'language', 'zh')
-                                # 判断是否 me+单角色对话
                                 agent_count = len(track.agents) if track else 0
                                 has_me = "me" in (track.agents if track else [])
                                 chat_mode = self.config.mode.mode
