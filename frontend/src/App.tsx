@@ -9,6 +9,9 @@ import { HomePage } from './components/HomePage/HomePage';
 import { SettingsPage } from './components/SettingsPage/SettingsPage';
 import { ttsPlayer } from './services/ttsPlayer';
 
+/** Skip TTS playback for current utterance when per-character voice is off */
+let _skipTts = false;
+
 export default function App() {
   const s = useAppStore();
   const isLoggedIn = useAppStore(s => s.isLoggedIn);
@@ -222,15 +225,25 @@ export default function App() {
       }
       // TTS 流式语音
       case 'tts_start': {
+        const agentName = data.agent_name || '';
+        const at = useAppStore.getState();
+        if (agentName && at.voiceMap[agentName] === false) {
+          // Voice is OFF for this character — skip
+          _skipTts = true;
+          break;
+        }
+        _skipTts = false;
         useAppStore.setState({ ttsStatus: '🔊 语音播报中...' });
         break;
       }
       case 'tts_chunk': {
+        if (_skipTts) break;
         ttsPlayer.addChunk(data.data);
         break;
       }
       case 'tts_end': {
-        useAppStore.setState({ ttsStatus: '' });
+        if (!_skipTts) useAppStore.setState({ ttsStatus: '' });
+        _skipTts = false;
         break;
       }
       case 'tts_error': {

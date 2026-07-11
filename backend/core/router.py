@@ -110,7 +110,7 @@ class Router(WerewolfGameMixin):
         self._scene_store = scene_store
         self._session_manager = session_manager or SessionManager("data/sessions")
         self.monitor = monitor or Monitor()
-        self.voice_enabled = True
+        self.voice_enabled = False
 
         # Memory
         self.memory = MemoryStore(
@@ -848,7 +848,8 @@ class Router(WerewolfGameMixin):
         return text
 
     async def _stream_tts_to_frontend(self, text: str, lang: str = "zh",
-                                        backend: str = "auto") -> None:
+                                        backend: str = "auto",
+                                        agent_name: str = "") -> None:
         """将文本转为语音并流式推送到前端
         自动清洗非对话内容（动作/心理/括号标注），TTS只朗读说话文本。
         
@@ -863,6 +864,7 @@ class Router(WerewolfGameMixin):
                 "text": clean[:50] + "..." if len(clean) > 50 else clean,
                 "lang": lang,
                 "backend": backend,
+                "agent_name": agent_name,
                 "original": text[:30] + "..." if len(text) > 30 else text,
             })
 
@@ -1601,7 +1603,7 @@ class Router(WerewolfGameMixin):
                                 else:
                                     tts_backend = "cosyvoice"
                                 try:
-                                    asyncio.create_task(self._stream_tts_to_frontend(content, lang, tts_backend))
+                                    asyncio.create_task(self._stream_tts_to_frontend(content, lang, tts_backend, agent_name=agent_name))
                                 except Exception:
                                     pass
                     except Exception as e:

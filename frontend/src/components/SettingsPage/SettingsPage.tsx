@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { api } from '../../api/client';
 import { useAppStore } from '../../store/appStore';
 import './SettingsPage.css';
@@ -26,15 +26,192 @@ export function SettingsPage() {
   const [language, setLanguage] = useState('zh');
   const [trackActivity, setTrackActivity] = useState('auto');
 
+  // Character state
+  const [charModalOpen, setCharModalOpen] = useState(false);
+  const [editingChar, setEditingChar] = useState<any>(null);
+  const [charFormName, setCharFormName] = useState('');
+  const [charFormPersona, setCharFormPersona] = useState('');
+  const [charFormVoice, setCharFormVoice] = useState('');
+  const [charGenKeywords, setCharGenKeywords] = useState('');
+  const [charGenLoading, setCharGenLoading] = useState(false);
+
+  // Scene state
+  const [sceneModalOpen, setSceneModalOpen] = useState(false);
+  const [editingScene, setEditingScene] = useState<any>(null);
+  const [sceneFormId, setSceneFormId] = useState('');
+  const [sceneFormName, setSceneFormName] = useState('');
+  const [sceneFormDesc, setSceneFormDesc] = useState('');
+  const [sceneGenKeywords, setSceneGenKeywords] = useState('');
+  const [sceneGenLoading, setSceneGenLoading] = useState(false);
+
+  // Delete confirmation
+  const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'character' | 'scene'; name: string; id?: string } | null>(null);
+
+  const store = useAppStore();
+
+  const refreshData = useCallback(async () => {
+    await useAppStore.getState().loadState();
+  }, []);
+
+  // ── Character handlers ──
+  const openNewChar = () => {
+    setEditingChar(null);
+    setCharFormName('');
+    setCharFormPersona('');
+    setCharFormVoice('');
+    setCharModalOpen(true);
+  };
+
+  const openEditChar = (c: any) => {
+    setEditingChar(c);
+    setCharFormName(c.name || '');
+    setCharFormPersona(c.persona || '');
+    setCharFormVoice(c.voice || '');
+    setCharModalOpen(true);
+  };
+
+  const saveCharacter = async () => {
+    if (!charFormName.trim()) return;
+    try {
+      if (editingChar) {
+        await api.updateCharacter(editingChar.name, {
+          name: charFormName.trim(),
+          persona: charFormPersona,
+          voice: charFormVoice,
+        });
+      } else {
+        await api.createCharacter({
+          name: charFormName.trim(),
+          persona: charFormPersona,
+          voice: charFormVoice,
+        });
+      }
+      setCharModalOpen(false);
+      await refreshData();
+    } catch (e: any) {
+      setMessage(e.message || '操作失败');
+      setMessageType('error');
+    }
+  };
+
+  const deleteCharacter = async (name: string) => {
+    try {
+      await api.deleteCharacter(name);
+      setDeleteConfirm(null);
+      await refreshData();
+    } catch (e: any) {
+      setMessage(e.message || '删除失败');
+      setMessageType('error');
+      setDeleteConfirm(null);
+    }
+  };
+
+  const generateCharacter = async () => {
+    if (!charGenKeywords.trim()) return;
+    setCharGenLoading(true);
+    try {
+      const result = await api.generateCharacter(charGenKeywords.trim());
+      if (result.character) {
+        setEditingChar(null);
+        setCharFormName(result.character.name || '');
+        setCharFormPersona(result.character.persona || '');
+        setCharFormVoice(result.character.voice || '');
+        setCharModalOpen(true);
+      }
+      setCharGenKeywords('');
+      await refreshData();
+    } catch (e: any) {
+      setMessage(e.message || '生成失败');
+      setMessageType('error');
+    }
+    setCharGenLoading(false);
+  };
+
+  // ── Scene handlers ──
+  const openNewScene = () => {
+    setEditingScene(null);
+    setSceneFormId('');
+    setSceneFormName('');
+    setSceneFormDesc('');
+    setSceneModalOpen(true);
+  };
+
+  const openEditScene = (s: any) => {
+    setEditingScene(s);
+    setSceneFormId(s.scene_id || '');
+    setSceneFormName(s.name || '');
+    setSceneFormDesc(s.description || '');
+    setSceneModalOpen(true);
+  };
+
+  const saveScene = async () => {
+    if (!sceneFormId.trim() || !sceneFormName.trim()) return;
+    try {
+      if (editingScene) {
+        await api.updateScene(editingScene.scene_id, {
+          scene_id: sceneFormId.trim(),
+          name: sceneFormName.trim(),
+          description: sceneFormDesc,
+        });
+      } else {
+        await api.createScene({
+          scene_id: sceneFormId.trim(),
+          name: sceneFormName.trim(),
+          description: sceneFormDesc,
+        });
+      }
+      setSceneModalOpen(false);
+      await refreshData();
+    } catch (e: any) {
+      setMessage(e.message || '操作失败');
+      setMessageType('error');
+    }
+  };
+
+  const deleteScene = async (id: string) => {
+    try {
+      await api.deleteScene(id);
+      setDeleteConfirm(null);
+      await refreshData();
+    } catch (e: any) {
+      setMessage(e.message || '删除失败');
+      setMessageType('error');
+      setDeleteConfirm(null);
+    }
+  };
+
+  const generateScene = async () => {
+    if (!sceneGenKeywords.trim()) return;
+    setSceneGenLoading(true);
+    try {
+      const result = await api.generateScene(sceneGenKeywords.trim());
+      if (result.scene) {
+        setEditingScene(null);
+        setSceneFormId(result.scene.scene_id || '');
+        setSceneFormName(result.scene.name || '');
+        setSceneFormDesc(result.scene.description || '');
+        setSceneModalOpen(true);
+      }
+      setSceneGenKeywords('');
+      await refreshData();
+    } catch (e: any) {
+      setMessage(e.message || '生成失败');
+      setMessageType('error');
+    }
+    setSceneGenLoading(false);
+  };
+
   useEffect(() => {
     Promise.all([
       api.getApiKeyConfig().catch(() => ({ api_base: 'https://api.deepseek.com', model: 'deepseek-chat', has_key: false, language: 'zh', track_activity: 'auto' })),
-      api.getModelRecommendations().catch(() => ({ models: [] }))
-    ]).then(([config, modelData]) => {
+      api.getModelRecommendations().catch(() => ({ models: [] })),
+      api.getLanguage().catch(() => ({ language: 'zh' }))
+    ]).then(([config, modelData, langData]) => {
       setApiBase(config.api_base || 'https://api.deepseek.com');
       setModel(config.model || 'deepseek-chat');
       setModels(modelData.models || []);
       if (config.language) setLanguage(config.language);
+      if (langData.language) setLanguage(langData.language);
       if (config.track_activity) setTrackActivity(config.track_activity);
     });
   }, []);
@@ -144,13 +321,95 @@ export function SettingsPage() {
         </div>
       )}
 
+      {/*** Characters Section ***/}
+      <div className="settings-card">
+        <div className="manage-section">
+          <h3>{'\uD83E\uDDD9\u200D♂️'} 素材库 - 角色</h3>
+          <button className="btn btn-sm" onClick={openNewChar}>+ 新建</button>
+        </div>
+
+        <div className="generate-row">
+          <input
+            type="text"
+            value={charGenKeywords}
+            onChange={e => setCharGenKeywords(e.target.value)}
+            placeholder="输入关键词，AI 生成角色..."
+            onKeyDown={e => { if (e.key === 'Enter') generateCharacter(); }}
+          />
+          <button className="btn btn-sm" onClick={generateCharacter} disabled={charGenLoading}>
+            {charGenLoading ? '生成中...' : 'AI 生成'}
+          </button>
+        </div>
+
+        {store.characters.length === 0 ? (
+          <p className="empty-hint">暂无角色，点击上方按钮新建或 AI 生成</p>
+        ) : (
+          store.characters.map((c: any) => (
+            <div key={c.name} className="manage-item">
+              <div className="manage-item-info">
+                <div className="manage-item-name">{c.name}</div>
+                <div className="manage-item-preview">{(c.persona || '').substring(0, 50)}{(c.persona || '').length > 50 ? '...' : ''}</div>
+                {c.voice && <div className="manage-item-voice">{'\uD83C\uDF99'} {c.voice}</div>}
+              </div>
+              <div className="manage-item-actions">
+                <button className="btn btn-sm" onClick={() => openEditChar(c)}>编辑</button>
+                <button className="btn btn-sm btn-danger" onClick={() => setDeleteConfirm({ type: 'character', name: c.name })}>删除</button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/*** Scenes Section ***/}
+      <div className="settings-card">
+        <div className="manage-section">
+          <h3>{'\uD83C\uDF0D'} 素材库 - 场景</h3>
+          <button className="btn btn-sm" onClick={openNewScene}>+ 新建</button>
+        </div>
+
+        <div className="generate-row">
+          <input
+            type="text"
+            value={sceneGenKeywords}
+            onChange={e => setSceneGenKeywords(e.target.value)}
+            placeholder="输入关键词，AI 生成场景..."
+            onKeyDown={e => { if (e.key === 'Enter') generateScene(); }}
+          />
+          <button className="btn btn-sm" onClick={generateScene} disabled={sceneGenLoading}>
+            {sceneGenLoading ? '生成中...' : 'AI 生成'}
+          </button>
+        </div>
+
+        {store.scenes.length === 0 ? (
+          <p className="empty-hint">暂无场景，点击上方按钮新建或 AI 生成</p>
+        ) : (
+          store.scenes.map((s: any) => (
+            <div key={s.scene_id || s.name} className="manage-item">
+              <div className="manage-item-info">
+                <div className="manage-item-name">{s.name} <span style={{ fontSize:'0.75rem', color:'var(--text-dim, #888)', marginLeft:4 }}>({s.scene_id})</span></div>
+                <div className="manage-item-preview">{(s.description || '').substring(0, 50)}{(s.description || '').length > 50 ? '...' : ''}</div>
+              </div>
+              <div className="manage-item-actions">
+                <button className="btn btn-sm" onClick={() => openEditScene(s)}>编辑</button>
+                <button className="btn btn-sm btn-danger" onClick={() => setDeleteConfirm({ type: 'scene', name: s.name, id: s.scene_id })}>删除</button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/*** Language & Activity Section ***/}
       <div className="settings-card">
         <h3>{'\uD83C\uDF10'} 多语言与轨道活跃度</h3>
 
         <label>界面与提示语言</label>
         <select
           value={language}
-          onChange={e => setLanguage(e.target.value)}
+          onChange={async e => {
+            const newLang = e.target.value;
+            setLanguage(newLang);
+            await api.setLanguage(newLang);
+          }}
           className="settings-select"
         >
           <option value="zh">中文</option>
@@ -180,6 +439,84 @@ export function SettingsPage() {
           <li><strong>快速测试</strong> — 用 DeepSeek Chat 或 GPT-4o Mini，响应最快</li>
         </ul>
       </div>
+
+      {/*** Character Modal ***/}
+      {charModalOpen && (
+        <div className="modal-overlay" onClick={() => setCharModalOpen(false)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()}>
+            <h3>{editingChar ? '编辑角色' : '新建角色'}</h3>
+
+            <label>角色名</label>
+            <input type="text" value={charFormName} onChange={e => setCharFormName(e.target.value)} placeholder="例如：福尔摩斯" />
+
+            <label>人设（persona）</label>
+            <textarea value={charFormPersona} onChange={e => setCharFormPersona(e.target.value)} placeholder="描述角色的性格、背景..." />
+
+            <label>语音</label>
+            <input type="text" value={charFormVoice} onChange={e => setCharFormVoice(e.target.value)} placeholder="例如：zh-CN-XiaoxiaoNeural" />
+
+            <div className="modal-actions">
+              <button className="btn btn-sm" onClick={() => setCharModalOpen(false)}>取消</button>
+              <button className="btn btn-sm btn-primary" onClick={saveCharacter}>
+                {editingChar ? '保存修改' : '创建'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/*** Scene Modal ***/}
+      {sceneModalOpen && (
+        <div className="modal-overlay" onClick={() => setSceneModalOpen(false)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()}>
+            <h3>{editingScene ? '编辑场景' : '新建场景'}</h3>
+
+            <label>场景 ID</label>
+            <input type="text" value={sceneFormId} onChange={e => setSceneFormId(e.target.value)} placeholder="例如：mystery_room" />
+
+            <label>场景名称</label>
+            <input type="text" value={sceneFormName} onChange={e => setSceneFormName(e.target.value)} placeholder="例如：神秘房间" />
+
+            <label>场景描述</label>
+            <textarea value={sceneFormDesc} onChange={e => setSceneFormDesc(e.target.value)} placeholder="描述场景的设定..." />
+
+            <div className="modal-actions">
+              <button className="btn btn-sm" onClick={() => setSceneModalOpen(false)}>取消</button>
+              <button className="btn btn-sm btn-primary" onClick={saveScene}>
+                {editingScene ? '保存修改' : '创建'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/*** Delete Confirmation Modal ***/}
+      {deleteConfirm && (
+        <div className="modal-overlay" onClick={() => setDeleteConfirm(null)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()}>
+            <h3>确认删除</h3>
+            <p style={{ color:'var(--text-secondary, #ccc)', fontSize:'0.9rem' }}>
+              确定要删除 {deleteConfirm.type === 'character' ? '角色' : '场景'}
+              「<strong>{deleteConfirm.name}</strong>」吗？此操作不可撤销。
+            </p>
+            <div className="modal-actions">
+              <button className="btn btn-sm" onClick={() => setDeleteConfirm(null)}>取消</button>
+              <button
+                className="btn btn-sm btn-danger"
+                onClick={() => {
+                  if (deleteConfirm.type === 'character') {
+                    deleteCharacter(deleteConfirm.name);
+                  } else {
+                    deleteScene(deleteConfirm.id || deleteConfirm.name);
+                  }
+                }}
+              >
+                确认删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

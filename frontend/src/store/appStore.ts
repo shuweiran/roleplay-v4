@@ -42,6 +42,11 @@ interface AppState {
   // Voice
   voiceRunning: boolean;
   voiceState: string;
+  // Per-character voice toggle (name -> enabled)
+  voiceMap: Record<string, boolean>;
+
+  setVoice: (charName: string, enabled: boolean) => void;
+  toggleVoice: (charName: string) => void;
 
   login: (code: string) => Promise<boolean>;
   logout: () => void;
@@ -134,6 +139,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   // Voice
   voiceRunning: false,
   voiceState: 'idle',
+  // Per-character voice toggle
+  voiceMap: {},
   // TTS
   ttsStatus: '',
   // Werewolf
@@ -391,6 +398,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       charStatuses: { ...s.charStatuses },
     }));
   },
+  // Per-character voice toggle
+  setVoice: (charName: string, enabled: boolean) => set(s => ({
+    voiceMap: { ...s.voiceMap, [charName]: enabled },
+  })),
+  toggleVoice: (charName: string) => set(s => ({
+    voiceMap: { ...s.voiceMap, [charName]: !s.voiceMap[charName] },
+  })),
   // Voice
   startVoice: async () => {
     try {

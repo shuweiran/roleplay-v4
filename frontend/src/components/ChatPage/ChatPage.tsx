@@ -267,7 +267,6 @@ function MessageView({ msg }: { msg: AppMessage }) {
 export function ChatPage() {
   const store = useAppStore();
   const [goalInput, setGoalInput] = useState('');
-const [voiceEnabled, setVoiceEnabled] = useState(true);
   const [userInput, setUserInput] = useState('');
   const [showDirector, setShowDirector] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -305,10 +304,6 @@ const [voiceEnabled, setVoiceEnabled] = useState(true);
     return () => { if (autoTimerRef.current) clearTimeout(autoTimerRef.current); };
   }, []);
 
-  const handleStartGame = () => {
-    setAutoPlay(true);
-    store.startRound(1);
-  };
 
   const visibleMessages = useMemo(() => {
     // Werewolf mode: filter messages visible to current human player
@@ -470,23 +465,15 @@ const [voiceEnabled, setVoiceEnabled] = useState(true);
                         {name}
                       </button>
                       <button className="btn btn-small btn-icon"
-                        onClick={async () => {
-                          const newVal = !voiceEnabled;
-                          setVoiceEnabled(newVal);
-                          await fetch('/api/voice/toggle', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ voice_enabled: newVal }),
-                          });
-                        }}
+                        onClick={() => store.toggleVoice(name)}
                         style={{
                           padding: '0 4px', fontSize: 11, lineHeight: '20px', height: 20,
-                          color: voiceEnabled ? '#7c4dff' : '#888',
-                          background: voiceEnabled ? '#7c4dff22' : 'transparent',
-                          border: '1px solid ' + (voiceEnabled ? '#7c4dff55' : '#444'),
+                          color: store.voiceMap[name] ? '#7c4dff' : '#888',
+                          background: store.voiceMap[name] ? '#7c4dff22' : 'transparent',
+                          border: '1px solid ' + (store.voiceMap[name] ? '#7c4dff55' : '#444'),
                         }}
-                        title={voiceEnabled ? '关闭语音' : '开启语音'}>
-                        {voiceEnabled ? '🔊' : '🔇'}
+                        title={store.voiceMap[name] ? '关闭语音' : '开启语音'}>
+                        {store.voiceMap[name] ? '🔊' : '🔇'}
                       </button>
                       <button className="btn btn-small btn-icon"
                         onClick={() => handleRemoveAgent(name)}
@@ -614,21 +601,11 @@ const [voiceEnabled, setVoiceEnabled] = useState(true);
                 </div>
               </div>
             )}
-            <button className="btn btn-primary round-actions" disabled={store.isRunning || autoPlay} onClick={handleStartGame}>开始游戏</button>
             {store.mode !== 'werewolf' && <button className="btn round-actions" disabled={store.isRunning} onClick={startAuto}>三轮</button>}
             <button className="btn btn-danger round-actions" disabled={!store.isRunning && !autoPlay} onClick={() => { setAutoPlay(false); store.stop(); }}>结束</button>
             <input value={userInput} onChange={e => setUserInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && send()} placeholder={composerPlaceholder()} />
             <button className="btn btn-icon mic-btn" onClick={() => startVoice(setUserInput)} title="语音输入">🎤</button>
-            <button
-              className={`btn btn-icon ${store.voiceRunning ? 'active' : ''}`}
-              onClick={() => store.voiceRunning ? store.stopVoice() : store.startVoice()}
-              title={store.voiceRunning ? `语音闭环运行中 (${store.voiceState}) — 点击停止` : '启动语音闭环'}
-              style={{ background: store.voiceRunning ? '#49c16d' : undefined }}
-            >
-              {store.voiceRunning ? '🔊' : '🔇'}
-            </button>
             <button className="btn btn-primary" disabled={!userInput.trim()} onClick={send}>发送</button>
-            <button className="btn btn-icon" onClick={() => setShowDirector(true)} title="导演面板">⚙️</button>
           </div>
         </main>
 

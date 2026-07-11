@@ -1,7 +1,7 @@
 """
 TTS Service — 语音合成服务
-主后端：千问 CosyVoice（DashScope）
-备选：edge-tts（微软）
+主后端：Edge TTS（微软，低延迟真流式）
+备选：千问 CosyVoice（DashScope）
 支持流式和非流式输出。
 """
 
@@ -48,9 +48,9 @@ async def stream_tts(
         lang: 语言
         voice: 音色
         backend: "edge" | "cosyvoice" | "auto"
-            - edge: Edge TTS，低延迟真流式，适合快速对话
-            - cosyvoice: 千问 CosyVoice，高音质，适合叙述
-            - auto: 有 DashScope Key 就用 cosyvoice，否则 edge
+            - edge: Edge TTS，低延迟真流式，适合快速对话（首选）
+            - cosyvoice: 千问 CosyVoice，高音质，适合叙述（备选）
+            - auto: Edge TTS 优先，失败回退 CosyVoice
     """
     if not text or not text.strip():
         return
@@ -71,15 +71,18 @@ async def stream_tts(
                 yield chunk
         return
 
-    # auto: CosyVoice 优先，失败回退 edge
-    api_key = _read_dashscope_key()
-    if api_key:
-        async for chunk in _cosyvoice_stream(text, voice or COSYVOICE_VOICE, api_key):
-            yield chunk
-    else:
-        logger.warning("未找到 DashScope API Key，回退 edge-tts")
+    # auto: Edge TTS 优先（低延迟真流式），失败回退 CosyVoice
+    try:
         async for chunk in _edge_stream(text, lang):
             yield chunk
+    except Exception as e:
+        logger.warning(f"Edge TTS 失败 ({e})，回退 CosyVoice")
+        api_key = _read_dashscope_key()
+        if api_key:
+            async for chunk in _cosyvoice_stream(text, voice or COSYVOICE_VOICE, api_key):
+                yield chunk
+        else:
+            logger.warning("CosyVoice 需要 DashScope API Key，无法回退")
 
 
 async def _cosyvoice_stream(

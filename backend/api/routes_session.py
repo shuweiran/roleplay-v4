@@ -475,17 +475,17 @@ async def voice_transcribe(request: Request):
 
 
 # Global voice_enabled flag (stored on app.state for persistence)
-_VOICE_ENABLED = True
+_VOICE_ENABLED = False
 
 
 @router.get("/voice/toggle")
 async def get_voice_toggle(request: Request):
     global _VOICE_ENABLED
-    return {"voice_enabled": getattr(request.app.state, '_voice_enabled', True)}
+    return {"voice_enabled": getattr(request.app.state, '_voice_enabled', False)}
 
 
 class VoiceToggleRequest(BaseModel):
-    voice_enabled: bool = True
+    voice_enabled: bool = False
 
 
 @router.post("/voice/toggle")

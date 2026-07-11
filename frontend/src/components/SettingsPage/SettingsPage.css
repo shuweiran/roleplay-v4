@@ -94,3 +94,172 @@
   color: #ef5350;
   border: 1px solid rgba(244, 67, 54, 0.3);
 }
+
+/* ── Character & Scene Management ────────────────── */
+
+.manage-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.manage-section h3 {
+  margin: 0 !important;
+  flex: 1;
+}
+
+.manage-section .btn {
+  white-space: nowrap;
+}
+
+.manage-section .btn-danger {
+  background: rgba(244, 67, 54, 0.2);
+  color: #ef5350;
+  border: 1px solid rgba(244, 67, 54, 0.3);
+}
+
+.manage-section .btn-danger:hover {
+  background: rgba(244, 67, 54, 0.35);
+}
+
+.manage-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border-color, #333);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  background: var(--input-bg, #16213e);
+}
+
+.manage-item-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.manage-item-name {
+  font-weight: 600;
+  font-size: 0.95rem;
+  margin-bottom: 4px;
+}
+
+.manage-item-preview {
+  color: var(--text-dim, #888);
+  font-size: 0.82rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.manage-item-voice {
+  color: var(--text-secondary, #aaa);
+  font-size: 0.8rem;
+  margin-top: 2px;
+}
+
+.manage-item-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+  align-items: center;
+}
+
+.manage-item-actions .btn {
+  padding: 4px 10px;
+  font-size: 0.8rem;
+}
+
+/* Modal overlay */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: var(--card-bg, #1a1a2e);
+  border: 1px solid var(--border-color, #444);
+  border-radius: 12px;
+  padding: 24px;
+  width: 90%;
+  max-width: 480px;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.modal-content h3 {
+  margin: 0 0 16px 0;
+  font-size: 1.1rem;
+}
+
+.modal-content label {
+  display: block;
+  margin-bottom: 4px;
+  margin-top: 12px;
+  font-size: 0.85rem;
+  color: var(--text-secondary, #ccc);
+}
+
+.modal-content input,
+.modal-content textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border-color, #444);
+  border-radius: 6px;
+  background: var(--input-bg, #16213e);
+  color: var(--text-color, #eee);
+  font-size: 0.9rem;
+  box-sizing: border-box;
+}
+
+.modal-content textarea {
+  min-height: 80px;
+  resize: vertical;
+}
+
+.modal-content input:focus,
+.modal-content textarea:focus {
+  outline: none;
+  border-color: #7c4dff;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.generate-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  align-items: center;
+}
+
+.generate-row input {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid var(--border-color, #444);
+  border-radius: 6px;
+  background: var(--input-bg, #16213e);
+  color: var(--text-color, #eee);
+  font-size: 0.85rem;
+}
+
+.generate-row .btn {
+  white-space: nowrap;
+}
+
+.empty-hint {
+  color: var(--text-dim, #888);
+  font-size: 0.85rem;
+  text-align: center;
+  padding: 16px;
+}

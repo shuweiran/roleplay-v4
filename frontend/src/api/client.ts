@@ -95,6 +95,8 @@ export const api = {
   getApiKeyConfig: () => request<any>('/api/config/apikey'),
   setApiKeyConfig: (apiKey: string, apiBase?: string, model?: string, language?: string, trackActivity?: string) =>
     request<any>('/api/config/apikey', { method: 'POST', body: JSON.stringify({ api_key: apiKey, api_base: apiBase || '', model: model || '', language: language || 'zh', track_activity: trackActivity || 'auto' }) }),
+  getLanguage: () => request<{language: string}>('/api/config/language'),
+  setLanguage: (language: string) => request<any>('/api/config/language', { method: 'POST', body: JSON.stringify({ language }) }),
   getModelRecommendations: () => request<any>('/api/config/models'),
   getVoiceConfig: () => request<any>('/api/config/voice'),
   setVoiceConfig: (voiceEnabled: boolean) => request<any>('/api/config/voice', { method: 'POST', body: JSON.stringify({ voice_enabled: voiceEnabled }) }),

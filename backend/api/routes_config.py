@@ -114,6 +114,24 @@ async def set_api_key(req: ApiKeyRequest, request: Request):
     return {"status": "ok", "message": "API Key 已保存并生效"}
 
 
+class LanguageRequest(BaseModel):
+    language: str = "zh"
+
+
+@router.get("/language")
+async def get_language(request: Request):
+    """Get current language setting."""
+    lang = getattr(request.app.state.config.mode, 'language', 'zh')
+    return {"language": lang}
+
+
+@router.post("/language")
+async def set_language(req: LanguageRequest, request: Request):
+    """Set language for TTS voice selection and UI."""
+    request.app.state.config.mode.language = req.language
+    return {"status": "ok", "language": req.language}
+
+
 @router.get("/models")
 async def get_model_recommendations():
     """Get model recommendations with descriptions."""
@@ -121,13 +139,13 @@ async def get_model_recommendations():
 
 
 class VoiceConfigRequest(BaseModel):
-    voice_enabled: bool = True
+    voice_enabled: bool = False
 
 
 @router.get("/voice")
 async def get_voice_config(request: Request):
     r = getattr(request.app.state, "router", None)
-    enabled = getattr(r, "voice_enabled", True) if r else True
+    enabled = getattr(r, "voice_enabled", False) if r else False
     return {"voice_enabled": enabled}
 
 
