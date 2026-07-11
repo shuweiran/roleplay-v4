@@ -57,10 +57,18 @@ def main():
     app = create_app(config)
 
     import uvicorn
-    print(f"🎭 Roleplay v4 starting on http://{args.host}:{args.port}")
-    print(f"  Model: {config.llm.model}")
+    print()
+    print("  ╔═══════════════════════════════════════╗")
+    print("  ║     🎭 Roleplay v4                     ║")
+    print("  ║     多智能体角色扮演系统               ║")
+    print("  ╚═══════════════════════════════════════╝")
+    print()
+    print(f"  🌐 打开浏览器访问 http://localhost:{args.port}")
+    print(f"  ⚙️  首次使用 → 左下角「设置」→ 填入你的 API Key")
+    print(f"  📦 Model: {config.llm.model}")
+    print()
     if args.dev:
-        print(f"   Dev mode: expecting Vite dev server on port {config.frontend.dev_port}")
+        print(f"  💻 Dev mode: expecting Vite dev server on port {config.frontend.dev_port}")
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
 
 

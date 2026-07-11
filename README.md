@@ -8,34 +8,24 @@
 
 ## 快速开始
 
-### 1. 安装依赖
+### 🪄 一键启动（推荐）
+
+**Windows 用户：** 双击 `启动.bat` 即可。
+
+脚本会自动：✅ 检查 Python → ✅ 安装依赖 → ✅ 启动服务 → ✅ 打开浏览器
+
+### 手动启动
 
 ```powershell
-pip install fastapi uvicorn httpx openai pyyaml jose
-```
-
-### 2. 构建前端（首次或前端修改后）
-
-```powershell
-cd frontend
-npm install
-npm run build
-cd ..
-```
-
-> 前端已经预构建在 `frontend/dist/` 中，可以直接启动。如需修改前端界面才需要重新构建。
-
-### 3. 启动服务
-
-```powershell
+pip install -r requirements.txt
 python -m backend.main --port 8000
 ```
 
-### 4. 配置 API Key
+### 配置 API Key
 
-打开浏览器访问 **http://localhost:8000** → 点击左下角 **⚙️ 设置** 按钮 → 输入你的 API Key、API 地址和模型名称 → 保存即可。
+打开浏览器 → 左下角 **⚙️ 设置** → 填入你的 API Key → 保存 → 开始玩！
 
-> 无需手动设置环境变量，所有配置通过网页端完成。密钥仅保存在本地 `backend/api_key.json`。
+> 无需手动设置环境变量，所有配置通过网页端完成。密钥仅保存在本地。
 
 ## 运行模式
 
