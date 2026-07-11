@@ -4,17 +4,15 @@ __pycache__/
 *.pyc
 *.pyo
 *.egg-info/
-dist/
-build/
+/build/
 *.egg
 .venv/
 venv/
 env/
 
 # Node
-node_modules/
 frontend/node_modules/
-frontend/dist/
+node_modules/
 
 # IDE
 .idea/
@@ -26,10 +24,9 @@ frontend/dist/
 .DS_Store
 Thumbs.db
 
-# Runtime data
+# Runtime data (exclude sessions, track default characters/scenes)
 backend/data/sessions/
-backend/data/characters/
-backend/data/scenes/
+backend/data/namespaces/
 *.log
 server.log
 server_err.log

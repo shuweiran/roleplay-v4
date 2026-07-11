@@ -1,0 +1,12 @@
+{
+  "scene_id": "werewolf_default",
+  "name": "狼人杀经典局",
+  "description": "狼人杀标准规则：角色分配、昼夜交替、投票出局、胜利判定。",
+  "initial_agent_names": [
+    "Suzhe",
+    "Linshi",
+    "Wangwu",
+    "Zhaoliu",
+    "Sunqi"
+  ]
+}
