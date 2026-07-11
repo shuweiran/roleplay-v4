@@ -25,7 +25,8 @@ export function useSSE(onEvent: SSEHandler) {
       'werewolf_wait_human', 'werewolf_phase', 'werewolf_player_update',
       'werewolf_my_role', 'werewolf_player_eliminated', 'werewolf_witch_info',
       'werewolf_game_over', 'agent_added', 'agent_removed',
-      'track_created', 'track_closed', 'phase_changed'];
+      'track_created', 'track_closed', 'phase_changed',
+      'tts_start', 'tts_chunk', 'tts_end', 'tts_error'];
     events.forEach(evt => {
       es.addEventListener(evt, (e: MessageEvent) => {
         try { onEvent(evt, JSON.parse(e.data)); } catch {}

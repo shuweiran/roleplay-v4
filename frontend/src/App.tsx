@@ -7,6 +7,7 @@ import type { WerewolfPhase } from './types';
 import { LoginPage } from './components/LoginPage/LoginPage';
 import { HomePage } from './components/HomePage/HomePage';
 import { SettingsPage } from './components/SettingsPage/SettingsPage';
+import { ttsPlayer } from './services/ttsPlayer';
 
 export default function App() {
   const s = useAppStore();
@@ -198,6 +199,24 @@ export default function App() {
       }
       case 'phase_changed': {
         store.addSystemMsg(`[阶段] → ${data.phase}`);
+        break;
+      }
+      // TTS 流式语音
+      case 'tts_start': {
+        useAppStore.setState({ ttsStatus: '🔊 语音播报中...' });
+        break;
+      }
+      case 'tts_chunk': {
+        ttsPlayer.addChunk(data.data);
+        break;
+      }
+      case 'tts_end': {
+        useAppStore.setState({ ttsStatus: '' });
+        break;
+      }
+      case 'tts_error': {
+        useAppStore.setState({ ttsStatus: '⚠️ 语音播报失败' });
+        console.warn('TTS error:', data.error);
         break;
       }
     }

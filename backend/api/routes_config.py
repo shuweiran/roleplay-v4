@@ -69,6 +69,8 @@ class ApiKeyRequest(BaseModel):
     api_key: str
     api_base: str = ""
     model: str = ""
+    language: str = "zh"
+    track_activity: str = "auto"
 
 
 @router.get("/apikey")
@@ -81,7 +83,9 @@ async def get_api_key(request: Request):
         "api_key": masked,
         "api_base": config.llm.api_base,
         "model": config.llm.model,
-        "has_key": bool(config.llm.api_key and config.llm.api_key != "***")
+        "has_key": bool(config.llm.api_key and config.llm.api_key != "***"),
+        "language": getattr(config.mode, 'language', 'zh'),
+        "track_activity": getattr(config.mode, 'track_activity', 'auto'),
     }
 
 
@@ -95,6 +99,10 @@ async def set_api_key(req: ApiKeyRequest, request: Request):
         config.llm.api_base = req.api_base
     if req.model:
         config.llm.model = req.model
+    if req.language:
+        config.mode.language = req.language
+    if req.track_activity:
+        config.mode.track_activity = req.track_activity
     # Recreate LLM client
     from ..services.llm_client import LLMClient
     monitor = getattr(request.app.state, "monitor", None)

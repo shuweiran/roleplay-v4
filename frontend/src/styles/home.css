@@ -23,7 +23,52 @@
   font-size: 16px;
   font-weight: 600;
   color: #fff;
-  margin-bottom: 32px;
+  margin-bottom: 20px;
+}
+
+/* 玩家角色名区域 */
+.home-player-section {
+  margin-bottom: 20px;
+  padding: 12px 14px;
+  background: rgba(124, 77, 255, 0.08);
+  border: 1px solid rgba(124, 77, 255, 0.2);
+  border-radius: 10px;
+}
+
+.player-label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #b388ff;
+  margin-bottom: 8px;
+  letter-spacing: 0.5px;
+}
+
+.player-input-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.player-name-input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border-color, #555);
+  border-radius: 6px;
+  background: var(--input-bg, #16213e);
+  color: var(--text-color, #eee);
+  font-size: 0.9rem;
+  box-sizing: border-box;
+}
+
+.player-name-input:focus {
+  outline: none;
+  border-color: #7c4dff;
+}
+
+.player-hint {
+  font-size: 0.72rem;
+  color: var(--text-dim, #777);
 }
 
 .home-logo .brand-mark {

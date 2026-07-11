@@ -169,3 +169,22 @@ class PhaseManager:
             "acted_players": list(self.acted_players),
             "is_game_over": self.is_game_over,
         }
+
+
+@dataclass
+class CharacterGoal:
+    """角色在本场景中的个人目标"""
+    character: str
+    goal: str                    # 目标描述，如"查明林诗的真正身份"
+    priority: int = 5            # 1-10，越高越重要
+    is_secret: bool = False      # 是否对其他角色保密
+    progress: str = "ongoing"    # ongoing / achieved / failed / abandoned
+
+    def to_dict(self) -> dict:
+        return {
+            "character": self.character,
+            "goal": self.goal,
+            "priority": self.priority,
+            "is_secret": self.is_secret,
+            "progress": self.progress,
+        }

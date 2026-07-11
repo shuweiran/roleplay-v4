@@ -37,6 +37,8 @@ interface AppState {
   isLoggedIn: boolean;
   userId: string;
   loginError: string;
+  // TTS
+  ttsStatus: string;
   // Voice
   voiceRunning: boolean;
   voiceState: string;
@@ -132,6 +134,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   // Voice
   voiceRunning: false,
   voiceState: 'idle',
+  // TTS
+  ttsStatus: '',
   // Werewolf
   werewolfPhase: 'day_discussion' as WerewolfPhase,
   werewolfRound: 1,

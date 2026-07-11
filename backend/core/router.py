@@ -19,6 +19,7 @@ v4 fixes:
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
 import time
@@ -40,6 +41,7 @@ from ..models.domain import (
 from ..services.llm_client import LLMClient
 from ..services.persistence import CharacterStore, SceneStore
 from ..services.session_manager import SessionManager
+from ..services.tts_service import stream_tts
 from .agent import Agent
 from .arbiter import Arbiter, UserInputCategory
 from .compressor import Compressor
@@ -637,6 +639,178 @@ class Router(WerewolfGameMixin):
         )
         return cfg
 
+    async def _configure_script_tracks_with_requests(self) -> TrackConfig:
+        """剧本杀模式变链流程：同轮审批，共享进度→各自上下文"""
+        from .track_request import request_manager, RequestType, TRACK_STRENGTH
+        from .i18n import t as _t
+        lang = getattr(self.config.mode, 'language', 'zh')
+
+        # Step 1: 主控整理当前剧情进度摘要（所有角色共享）
+        shared_summary = self._build_script_shared_context()
+
+        # 缓存共享上下文供后续使用
+        self._script_shared_context = shared_summary
+
+        # Step 2: 评估角色变链需求（基于共享进度 + 个人目标）
+        character_goals = self._get_script_character_goals()
+        track_requests = []
+
+        if self.arbiter:
+            goals_text = "\n".join(f"- {g['name']}: {g['goal']}" for g in character_goals)
+            current_tracks = ""
+            if self.current_track_config:
+                for t in self.current_track_config.tracks:
+                    current_tracks += f"  轨道 {t.id} ({t.mode}): {'、'.join(t.agents)}\n"
+
+            scene_text = self.scene_description or "未设置"
+
+            prompt = f"""你是剧本杀主控仲裁者，请评估每个角色本轮是否需要调整轨道。
+
+【剧本逻辑】
+当前场景：{scene_text}
+
+【当前剧情进度】
+{shared_summary or '（新开场）'}
+
+【当前轨道配置】
+{current_tracks or '（未配置）'}
+
+【角色个人目标】
+{goals_text}
+
+对每个角色判断：
+1. 基于他们的个人目标，他们是否需要本轮单独行动（isolated）？
+2. 他们是否需要私下交流（weak）？
+3. 还是维持集体讨论（merged）？
+
+返回JSON（必须包含所有角色）：
+{{"requests": [
+  {{"agent": "角色名", "preferred_mode": "merged/weak/isolated", "reason": "基于其目标的原因"}},
+  ...
+]}}"""
+
+            try:
+                result = await self.arbiter._llm.call_json(prompt, max_tokens=600)
+                track_requests = result.get("requests", [])
+            except Exception:
+                track_requests = []
+
+        # Step 3: 主控审批（基于剧本逻辑 + 场景逻辑，不受角色目标影响）
+        approved_changes = {}
+        if self.arbiter and track_requests:
+            requests_text = "\n".join(
+                f"- {r.get('agent','?')} 希望切换到 {r.get('preferred_mode','merged')}（理由：{r.get('reason','')}）"
+                for r in track_requests
+            )
+
+            goals = self.goals or []
+            goals_text = "；".join(goals) if goals else "推进剧情发展"
+
+            approve_prompt = f"""你是剧本杀主控，请审批以下角色的轨道变更申请。
+
+审批标准（只考虑以下两点）：
+1. ✅ 是否符合剧本逻辑——这场戏的设定是什么？角色应该在哪里？
+2. ✅ 是否符合场景逻辑——当前场景是否允许这种轨道分配？
+
+【剧本逻辑】当前场景：{scene_text}
+【场景设定】{shared_summary or '新开场'}
+
+【角色申请】
+{requests_text}
+
+逐条判断，返回JSON：
+{{"reviews": [
+  {{"agent": "角色名", "approve": true/false, "track": "merged/weak/isolated", "reasoning": "基于剧本和场景逻辑的审批理由"}},
+  ...
+]}}
+注意：至少保持 2 个角色在 merged 轨道，维持剧情推进。"""
+
+            try:
+                result = await self.arbiter._llm.call_json(approve_prompt, max_tokens=500)
+                reviews = result.get("reviews", [])
+            except Exception:
+                reviews = []
+
+            for review in reviews:
+                agent = review.get("agent", "")
+                if review.get("approve", False):
+                    approved_changes[agent] = review.get("track", "merged")
+                    # 记录申请（用于历史追踪）
+                    request_manager.submit_request(
+                        agent_name=agent,
+                        current_mode="unknown",
+                        target_mode=review.get("track", "merged"),
+                        reason=review.get("reasoning", ""),
+                    )
+
+        # Step 4: 生成最终轨道（基础轨道 + 已批准的变更）
+        sc = self._configure_script_tracks()
+
+        # 应用批准的轨道变更
+        if approved_changes:
+            for track in sc.tracks:
+                track.agents = [a for a in track.agents if a not in approved_changes]
+
+            # 为批准变更的角色分配新轨道
+            for agent_name, target_mode in approved_changes.items():
+                target_track = None
+                for t in sc.tracks:
+                    if t.mode == target_mode:
+                        target_track = t
+                        break
+                if target_track is None:
+                    # 创建新轨道
+                    from .track_manager import Track as TrackCls
+                    import uuid
+                    new_track = TrackCls(
+                        id=f"script_{uuid.uuid4().hex[:6]}",
+                        agents=[agent_name],
+                        agent_actions={agent_name: "active"},
+                        mode=target_mode,
+                        label=f"轨道{len(sc.tracks)+1}",
+                    )
+                    sc.tracks.append(new_track)
+                else:
+                    target_track.agents.append(agent_name)
+                    if hasattr(target_track, 'agent_actions'):
+                        target_track.agent_actions[agent_name] = "active"
+
+        return sc
+
+    def _build_script_shared_context(self) -> str:
+        """为剧本杀模式构建所有角色共享的剧情进度摘要"""
+        if not self.memory:
+            return ""
+
+        # 获取最近几轮的摘要
+        summary = self.memory.get_summary_context() if hasattr(self.memory, 'get_summary_context') else ""
+
+        # 补充当前场景信息
+        parts = []
+        if self.scene_description:
+            parts.append(f"场景：{self.scene_description}")
+        if self.current_round:
+            parts.append(f"当前第{self.current_round}轮")
+        if self.goals:
+            parts.append(f"剧情目标：{'；'.join(self.goals[:3])}")
+        if summary:
+            parts.append(f"剧情进度：{summary[:500]}")
+
+        return "\n".join(parts) if parts else "（对话刚开始）"
+
+    def _get_script_character_goals(self) -> list:
+        """获取剧本杀模式中所有角色的个人目标"""
+        goals = []
+        for name, agent in self.agents.items():
+            goal = ""
+            if hasattr(agent.persona, 'script_goal') and agent.persona.script_goal:
+                goal = agent.persona.script_goal
+            elif hasattr(agent.persona, 'description'):
+                # 从角色描述中提取目标
+                goal = agent.persona.description[:100] if agent.persona.description else ""
+            goals.append({"name": name, "goal": goal or "无明确目标"})
+        return goals
+
     def _filter_game_output(self, agent_name: str, content: str, mode: str) -> str:
         """Filter AI output in rule-based modes — only keep speech + actions.
         Strips internal monologue, narration, and meta-commentary."""
@@ -652,6 +826,33 @@ class Router(WerewolfGameMixin):
         if not filtered:
             filtered = content  # fallback: return original if filter removed everything
         return filtered
+
+    async def _stream_tts_to_frontend(self, text: str, lang: str = "zh",
+                                        backend: str = "auto") -> None:
+        """将文本转为语音并流式推送到前端
+        
+        backend:
+            - "edge": Edge TTS (低延迟流式)，me与单角色对话时用
+            - "cosyvoice": 千问 CosyVoice (高音质)，多角色/旁白时用
+            - "auto": 自动选择
+        """
+        try:
+            await self._emit("tts_start", {
+                "text": text[:50] + "..." if len(text) > 50 else text,
+                "lang": lang,
+                "backend": backend,
+            })
+
+            async for audio_chunk in stream_tts(text, lang=lang, backend=backend):
+                chunk_b64 = base64.b64encode(audio_chunk).decode("ascii")
+                await self._emit("tts_chunk", {
+                    "data": chunk_b64,
+                    "len": len(audio_chunk),
+                })
+
+            await self._emit("tts_end", {"status": "done"})
+        except Exception as e:
+            await self._emit("tts_error", {"error": str(e)})
 
     def _build_character_relations(self, script_data: dict) -> None:
         """Build internal relationship graph from script relationships."""
@@ -945,6 +1146,23 @@ class Router(WerewolfGameMixin):
         from .track_request import request_manager, RequestType
         self._process_pending_track_requests()
 
+        # 根据模式和活跃度设置轨道变更频率
+        activity = getattr(self.config.mode, 'track_activity', 'auto')
+        mode = self.config.mode.mode
+
+        # 一般模式：最低活跃度（尽量不变链）
+        # 剧本杀模式：最高活跃度（频繁变链）
+        # 其他模式：自动
+        if activity == 'auto':
+            if mode in ('free', 'protagonist', 'director'):
+                self._track_activity_level = 'minimal'
+            elif mode == 'script':
+                self._track_activity_level = 'maximum'
+            else:
+                self._track_activity_level = 'normal'
+        else:
+            self._track_activity_level = activity
+
         # 记录上一轮的轨道分配，用于后续对比检测角色轨道变化
         self._prev_track_modes: dict = {}
         if self.current_track_config:
@@ -974,9 +1192,9 @@ class Router(WerewolfGameMixin):
             self.track_history.append(wc.to_dict())
             return wc
 
-        # Script mode: use isolated character tracks
+        # Script mode: 角色目标驱动的变链申请 → 审批 → 定轨 → 对话
         if self.config.mode.mode == "script" and self._script_config:
-            sc = self._configure_script_tracks()
+            sc = await self._configure_script_tracks_with_requests()
             self.current_track_config = sc
             self.track_history.append(sc.to_dict())
             return sc
@@ -1043,19 +1261,38 @@ class Router(WerewolfGameMixin):
         for t in tracks:
             for agent_name in t.agents:
                 new_modes[agent_name] = t.mode
+
+        activity_level = getattr(self, '_track_activity_level', 'normal')
+        from .i18n import t as _t
+        lang = getattr(self.config.mode, 'language', 'zh')
+
         for agent_name, new_mode in new_modes.items():
             old_mode = self._prev_track_modes.get(agent_name)
             if old_mode and old_mode != new_mode:
+                # 根据活跃度决定是否记录
+                if activity_level == 'minimal':
+                    continue  # 一般模式：忽略轨道变化，保持稳定
+                elif activity_level == 'normal':
+                    # 普通模式：只记录大幅变化（isolated ↔ merged）
+                    strengths = {'isolated': 0, 'weak': 1, 'merged': 2}
+                    diff = abs(strengths.get(new_mode, 0) - strengths.get(old_mode, 0))
+                    if diff < 2:
+                        continue  # 小幅变化不记录
+                # maximum: 记录所有变化（剧本杀模式）
+
+                reason = _t("track_change_req", lang)
                 req = request_manager.submit_request(
                     agent_name=agent_name,
                     target_agent="",
                     current_mode=old_mode,
                     target_mode=new_mode,
-                    reason="角色自主判断需要调整轨道",
+                    reason=reason,
                 )
                 # 主控已在本轮批准该变更，标记为已批
                 if req.status.value == "pending":
-                    request_manager.approve_request(req.id, "主控自动批准（已执行）")
+                    goals_text = ", ".join(self.goals) if self.goals else "无明确目标"
+                    approve_reason = _t("track_change_approve", lang, goals=goals_text)
+                    request_manager.approve_request(req.id, approve_reason)
 
         tc = TrackConfig(tracks=tracks, round=self.current_round, description=reasoning)
         self.current_track_config = tc
@@ -1324,6 +1561,23 @@ class Router(WerewolfGameMixin):
                                 "track_mode": track.mode,
                                 "visible_to": visible_to,
                             })
+                            # 流式 TTS：根据上下文选择后端
+                            # me+单角色对话 → Edge (低延迟流式)
+                            # 多角色/旁白 → CosyVoice (高音质)
+                            if content and len(content) > 5:
+                                lang = getattr(self.config.mode, 'language', 'zh')
+                                # 判断是否 me+单角色对话
+                                agent_count = len(track.agents) if track else 0
+                                has_me = "me" in (track.agents if track else [])
+                                chat_mode = self.config.mode.mode
+                                if chat_mode in ("free", "director") and has_me and agent_count <= 2:
+                                    tts_backend = "edge"
+                                else:
+                                    tts_backend = "cosyvoice"
+                                try:
+                                    asyncio.create_task(self._stream_tts_to_frontend(content, lang, tts_backend))
+                                except Exception:
+                                    pass
                     except Exception as e:
                         err = f"[{agent_name} 走神了: {e}]"
                         visible_to = [agent_name] if track.mode == "isolated" else track.agents

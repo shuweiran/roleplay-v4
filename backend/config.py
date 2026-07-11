@@ -155,6 +155,8 @@ class ModeConfig:
     protagonist: str = ""          # protagonist name
     director_character: str = ""   # user's character name in director/werewolf mode
     advanced_tracks: List[str] = field(default_factory=list)
+    language: str = "zh"            # "zh" | "en" | "jp" | "kr"
+    track_activity: str = "auto"    # "auto" | "minimal" | "maximum"
 
 
 # ── Token optimizer config ─────────────────────────────────────────

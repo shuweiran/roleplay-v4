@@ -95,6 +95,21 @@ export function HomePage() {
           <div className="brand-mark">R</div>
           <span>Roleplay v4</span>
         </div>
+
+        {/* 玩家角色名 — 显眼位置 */}
+        <div className="home-player-section">
+          <label className="player-label">🎭 你的角色</label>
+          <div className="player-input-row">
+            <input
+              className="player-name-input"
+              value={playerName}
+              onChange={e => { setPlayerName(e.target.value); store.setCurrentPlayer(e.target.value); }}
+              placeholder="输入你的角色名，如 me"
+            />
+            <span className="player-hint">me = 以你本人身份参与对话</span>
+          </div>
+        </div>
+
         <div className="home-recent-list">
           <h4>最近故事
             <button className="btn-text btn-refresh" onClick={loadSessions} disabled={loading} style={{ marginLeft: 8, fontSize: 12 }}>

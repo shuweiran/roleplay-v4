@@ -584,6 +584,7 @@ export function ChatPage() {
             </div>
           )}
 
+          {store.ttsStatus && <div className="tts-indicator">{store.ttsStatus}</div>}
           <div className="composer">
             {store.werewolfWaitHuman && effectivePlayer() && (
               <div className="wait-human-banner" style={{ borderRadius: 4, marginBottom: 6 }}>

@@ -93,8 +93,8 @@ export const api = {
   voiceStart: () => request<any>('/api/voice/start', { method: 'POST' }),
   voiceStop: () => request<any>('/api/voice/stop', { method: 'POST' }),
   getApiKeyConfig: () => request<any>('/api/config/apikey'),
-  setApiKeyConfig: (apiKey: string, apiBase?: string, model?: string) =>
-    request<any>('/api/config/apikey', { method: 'POST', body: JSON.stringify({ api_key: apiKey, api_base: apiBase || '', model: model || '' }) }),
+  setApiKeyConfig: (apiKey: string, apiBase?: string, model?: string, language?: string, trackActivity?: string) =>
+    request<any>('/api/config/apikey', { method: 'POST', body: JSON.stringify({ api_key: apiKey, api_base: apiBase || '', model: model || '', language: language || 'zh', track_activity: trackActivity || 'auto' }) }),
   getModelRecommendations: () => request<any>('/api/config/models'),
 };
 

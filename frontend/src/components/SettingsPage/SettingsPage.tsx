@@ -23,15 +23,19 @@ export function SettingsPage() {
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [showModels, setShowModels] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [language, setLanguage] = useState('zh');
+  const [trackActivity, setTrackActivity] = useState('auto');
 
   useEffect(() => {
     Promise.all([
-      api.getApiKeyConfig().catch(() => ({ api_base: 'https://api.deepseek.com', model: 'deepseek-chat', has_key: false })),
+      api.getApiKeyConfig().catch(() => ({ api_base: 'https://api.deepseek.com', model: 'deepseek-chat', has_key: false, language: 'zh', track_activity: 'auto' })),
       api.getModelRecommendations().catch(() => ({ models: [] }))
     ]).then(([config, modelData]) => {
       setApiBase(config.api_base || 'https://api.deepseek.com');
       setModel(config.model || 'deepseek-chat');
       setModels(modelData.models || []);
+      if (config.language) setLanguage(config.language);
+      if (config.track_activity) setTrackActivity(config.track_activity);
     });
   }, []);
 
@@ -52,8 +56,8 @@ export function SettingsPage() {
     }
     setSaving(true);
     try {
-      await api.setApiKeyConfig(apiKey.trim(), apiBase.trim(), model.trim());
-      setMessage('API Key 已保存并生效');
+      await api.setApiKeyConfig(apiKey.trim(), apiBase.trim(), model.trim(), language, trackActivity);
+      setMessage('配置已保存并生效');
       setMessageType('success');
     } catch (e: any) {
       setMessage(e.message || '保存失败');
@@ -139,6 +143,33 @@ export function SettingsPage() {
           </div>
         </div>
       )}
+
+      <div className="settings-card">
+        <h3>{'\uD83C\uDF10'} 多语言与轨道活跃度</h3>
+
+        <label>界面与提示语言</label>
+        <select
+          value={language}
+          onChange={e => setLanguage(e.target.value)}
+          className="settings-select"
+        >
+          <option value="zh">中文</option>
+          <option value="en">English</option>
+          <option value="jp">日本語</option>
+          <option value="kr">한국어</option>
+        </select>
+
+        <label>轨道活跃度</label>
+        <select
+          value={trackActivity}
+          onChange={e => setTrackActivity(e.target.value)}
+          className="settings-select"
+        >
+          <option value="auto">自动（一般模式最低，剧本杀最高）</option>
+          <option value="minimal">最低（尽量保持轨道不变）</option>
+          <option value="maximum">最高（频繁调整轨道）</option>
+        </select>
+      </div>
 
       <div className="settings-card">
         <h3>使用提示</h3>
