@@ -6,25 +6,36 @@
 
 基于 LLM 的多角色对话引擎，支持**铁轨路由**（强链/弱链/分离）、**主控仲裁**、**上下文压缩**、**SSE 实时流**。
 
-## 一键启动
+## 快速开始
+
+### 1. 安装依赖
 
 ```powershell
-# 1. 设置 API Key (或放到桌面 "新建 文本文档 (2).txt")
-$env:LLM_API_KEY = "sk-xxxxxxxx"
-$env:LLM_API_BASE = "https://api.deepseek.com"
-$env:LLM_MODEL = "deepseek-v4-pro"
-
-# 2. 安装依赖
 pip install fastapi uvicorn httpx openai pyyaml jose
+```
 
-# 3. 构建前端 (首次或前端修改后)
-cd frontend; npm install; npm run build; cd ..
+### 2. 构建前端（首次或前端修改后）
 
-# 4. 启动
+```powershell
+cd frontend
+npm install
+npm run build
+cd ..
+```
+
+> 前端已经预构建在 `frontend/dist/` 中，可以直接启动。如需修改前端界面才需要重新构建。
+
+### 3. 启动服务
+
+```powershell
 python -m backend.main --port 8000
 ```
 
-访问 `http://localhost:8000`。
+### 4. 配置 API Key
+
+打开浏览器访问 **http://localhost:8000** → 点击左下角 **⚙️ 设置** 按钮 → 输入你的 API Key、API 地址和模型名称 → 保存即可。
+
+> 无需手动设置环境变量，所有配置通过网页端完成。密钥仅保存在本地 `backend/api_key.json`。
 
 ## 运行模式
 
@@ -63,15 +74,20 @@ roleplay-v4/
 ├── backend/                # FastAPI 后端
 │   ├── main.py             # 入口
 │   ├── config.py           # 配置 (dataclass)
+│   ├── api_key.json        # 用户保存的 API Key（自动生成）
 │   ├── api/                # HTTP 路由层
 │   │   ├── app.py               # FastAPI 工厂 + lifespan
 │   │   ├── dependencies.py      # 依赖注入
+│   │   ├── routes_config.py     # API Key 配置接口
 │   │   ├── routes_characters.py # 角色 CRUD
 │   │   ├── routes_scenes.py     # 场景 CRUD
 │   │   ├── routes_round.py      # 轮次管理 + 回退
 │   │   ├── routes_session.py    # 会话/模式/目标/发送
 │   │   ├── routes_sse.py        # SSE 事件流
-│   │   └── routes_history.py    # 历史查询(服务端过滤)
+│   │   ├── routes_history.py    # 历史查询(服务端过滤)
+│   │   ├── routes_auth.py       # 邀请码认证
+│   │   ├── routes_room.py       # 联机房间
+│   │   └── routes_voice.py      # 语音输入
 │   ├── core/               # 业务逻辑 (零 HTTP 依赖)
 │   │   ├── router.py            # 铁轨调度核心
 │   │   ├── agent.py             # 角色 LLM 代理
@@ -80,14 +96,27 @@ roleplay-v4/
 │   │   ├── compressor.py        # 对话压缩
 │   │   ├── lorebook.py          # 世界知识库
 │   │   ├── persona.py           # 人格定义
-│   │   └── monitor.py           # 用量/成本追踪
+│   │   ├── monitor.py           # 用量/成本追踪
+│   │   ├── script_runtime.py    # 剧本杀运行时（开发中）
+│   │   ├── werewolf_api.py      # 狼人杀 API
+│   │   ├── werewolf_arbiter.py  # 狼人杀仲裁器
+│   │   ├── werewolf_game.py     # 狼人杀游戏逻辑
+│   │   └── track_manager.py     # 轨道管理
+│   ├── games/              # 游戏定义
+│   │   ├── engine.py            # 游戏引擎基类
+│   │   ├── schema.py            # 游戏数据模型
+│   │   ├── werewolf_engine.py   # 狼人杀引擎
+│   │   └── scripts/             # 游戏规则 JSON
 │   ├── models/             # 纯数据结构
 │   │   ├── domain.py            # Track/Message/Session 等
 │   │   └── schemas.py           # Pydantic 验证模型
 │   ├── services/           # 共享基础设施
 │   │   ├── llm_client.py        # 单一共享 HTTP 客户端
 │   │   ├── persistence.py       # 原子 JSON 文件读写
-│   │   └── session_manager.py   # 会话持久化 + 自动裁剪
+│   │   ├── session_manager.py   # 会话持久化 + 自动裁剪
+│   │   └── web_search.py        # 联网搜索
+│   ├── profiles/           # 预设角色
+│   ├── scenes/             # 预设场景
 │   └── data/               # 运行时数据
 │       ├── characters/          # 角色 JSON
 │       ├── scenes/              # 场景 JSON
@@ -95,29 +124,38 @@ roleplay-v4/
 │
 ├── frontend/               # React SPA
 │   ├── src/
-│   │   ├── App.tsx              # 根组件 + SSE 事件中心
+│   │   ├── App.tsx              # 根组件 + 页面路由
 │   │   ├── main.tsx             # 入口
 │   │   ├── types/index.ts       # TypeScript 类型
 │   │   ├── store/appStore.ts    # Zustand 全局状态
 │   │   ├── api/client.ts        # Fetch 封装
 │   │   ├── api/useSSE.ts        # SSE 连接 Hook
 │   │   ├── components/
+│   │   │   ├── HomePage/        # 首页（模式选择/房间）
 │   │   │   ├── ScenePage/       # 场景选择页
-│   │   │   └── ChatPage/        # 对话页
-│   │   └── styles/global.css    # 暗色主题
+│   │   │   ├── ChatPage/        # 对话页
+│   │   │   ├── SettingsPage/    # API Key 设置页
+│   │   │   ├── LoginPage/       # 登录页
+│   │   │   ├── HistoryPanel/    # 历史记录
+│   │   │   └── MaterialPage/    # 资料管理
+│   │   └── styles/              # 样式文件
 │   └── vite.config.ts           # Vite 配置 + API proxy
 │
-└── README.md
+├── .gitignore
+├── README.md
+└── requirements.txt
 ```
 
 ## 环境变量
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `LLM_API_KEY` | LLM API 密钥 | 可通过网页端设置页面配置，也可通过环境变量设置 |
+| `LLM_API_KEY` | LLM API 密钥（环境变量后备） | 优先使用网页端配置 |
 | `LLM_API_BASE` | API 地址 | `https://api.deepseek.com` |
 | `LLM_MODEL` | 模型名称 | `deepseek-v4-flash` |
 | `ROLEPLAY_ADMIN_KEY` | 管理员密钥 | `admin-secret-change-me` |
+
+> 💡 **推荐在网页端设置页面配置 API Key**，无需手动设置环境变量。
 
 ## API 文档
 
@@ -143,6 +181,34 @@ roleplay-v4/
 | POST | `/api/goals` | 设置剧情目标 |
 | GET | `/api/events` | SSE 事件流 |
 | GET | `/api/history?round=N&character=名` | 历史消息（支持过滤） |
+| GET | `/api/config/apikey` | 获取当前 API Key 配置（已脱敏） |
+| POST | `/api/config/apikey` | 设置新的 API Key |
+
+### 模式切换
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/mode` | 获取当前模式 |
+| POST | `/api/mode` | 切换模式（free/protagonist/multi_track/director/werewolf） |
+
+### 联机房间
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/rooms` | 创建房间 |
+| POST | `/api/rooms/{code}/join` | 加入房间 |
+| GET | `/api/rooms/{code}` | 获取房间状态 |
+| POST | `/api/rooms/{code}/leave` | 离开房间 |
+
+### 狼人杀
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/werewolf/init` | 初始化狼人杀 |
+| POST | `/api/werewolf/setup` | 设置狼人杀模式 |
+| POST | `/api/werewolf/night_action` | 夜间行动 |
+| POST | `/api/werewolf/vote` | 投票 |
+| GET | `/api/werewolf/status` | 游戏状态 |
 
 ## 铁轨系统
 
@@ -233,22 +299,4 @@ python -m backend.main --help
 **前端**: React 19, TypeScript, Vite 5, Zustand, CSS Variables
 **LLM**: DeepSeek (OpenAI 兼容 API)
 
-## 配置 API Key
 
-启动后访问 `http://localhost:8000`，在主页左下角点击 **⚙️ 设置** 按钮，即可配置：
-
-1. **API Key** — 你的 LLM API 密钥
-2. **API Base URL** — API 地址（默认：`https://api.deepseek.com`）
-3. **模型名称** — 使用的模型（默认：`deepseek-v4-flash`）
-
-密钥仅保存在本地 `backend/api_key.json` 文件中，不会上传至任何外部服务器。
-
-也可以通过环境变量配置：
-
-```bash
-$env:LLM_API_KEY = "sk-xxx"
-$env:LLM_API_BASE = "https://api.deepseek.com"
-$env:LLM_MODEL = "deepseek-v4-flash"
-```
-
-注意：网页端配置的优先级高于环境变量。
