@@ -827,9 +827,30 @@ class Router(WerewolfGameMixin):
             filtered = content  # fallback: return original if filter removed everything
         return filtered
 
+    def _clean_tts_text(self, raw: str) -> str:
+        """清洗文本用于TTS：只保留说话内容，去掉动作/心理/括号标注"""
+        import re
+        # 去掉【】内的内容
+        text = re.sub(r'\u3010[^\u3011]*\u3011', '', raw)
+        # 去掉[]内的内容
+        text = re.sub(r'\[[^\]]*\]', '', text)
+        # 去掉（）内的内容（中文括号的心理活动）
+        text = re.sub(r'\（[^\）]*\）', '', text)
+        # 去掉( )内的内容
+        text = re.sub(r'\([^)]*\)', '', text)
+        # 去掉【*】强调标记
+        text = re.sub(r'\*[^*]*\*', '', text)
+        # 清理多余空白
+        text = re.sub(r'\s+', ' ', text).strip()
+        # 如果清洗后为空，返回原文本的前50字（保底）
+        if not text or len(text) < 2:
+            return raw[:80]
+        return text
+
     async def _stream_tts_to_frontend(self, text: str, lang: str = "zh",
                                         backend: str = "auto") -> None:
         """将文本转为语音并流式推送到前端
+        自动清洗非对话内容（动作/心理/括号标注），TTS只朗读说话文本。
         
         backend:
             - "edge": Edge TTS (低延迟流式)，me与单角色对话时用
@@ -837,13 +858,15 @@ class Router(WerewolfGameMixin):
             - "auto": 自动选择
         """
         try:
+            clean = self._clean_tts_text(text)
             await self._emit("tts_start", {
-                "text": text[:50] + "..." if len(text) > 50 else text,
+                "text": clean[:50] + "..." if len(clean) > 50 else clean,
                 "lang": lang,
                 "backend": backend,
+                "original": text[:30] + "..." if len(text) > 30 else text,
             })
 
-            async for audio_chunk in stream_tts(text, lang=lang, backend=backend):
+            async for audio_chunk in stream_tts(clean, lang=lang, backend=backend):
                 chunk_b64 = base64.b64encode(audio_chunk).decode("ascii")
                 await self._emit("tts_chunk", {
                     "data": chunk_b64,
