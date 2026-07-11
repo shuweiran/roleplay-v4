@@ -6,7 +6,6 @@ import { ChatPage } from './components/ChatPage/ChatPage';
 import type { WerewolfPhase } from './types';
 import { LoginPage } from './components/LoginPage/LoginPage';
 import { HomePage } from './components/HomePage/HomePage';
-import { MaterialPage } from './components/MaterialPage/MaterialPage';
 import { SettingsPage } from './components/SettingsPage/SettingsPage';
 
 export default function App() {

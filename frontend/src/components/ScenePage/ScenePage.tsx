@@ -12,7 +12,7 @@ export function ScenePage() {
   const {
     characters, scenes, mode,
     currentPlayer, roomCode, onlinePlayers,
-    goToView, goChat, enterScene,
+    goToView, enterScene,
     setMode, loadState, loadHistory,
   } = store;
 
@@ -32,7 +32,7 @@ export function ScenePage() {
   const [formDesc, setFormDesc] = useState('');
   const [formKeyword, setFormKeyword] = useState('');
   const [scriptPrompt, setScriptPrompt] = useState('');
-  const [scriptJson, setScriptJson] = useState('');
+  const [scriptJson] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [roleConfig, setRoleConfig] = useState<Record<string, number>>({
     wolf: 1, seer: 1, witch: 1, hunter: 0, villager: 2,
@@ -165,30 +165,11 @@ export function ScenePage() {
 
   // Script generation
   const genScript = async () => {
-    if (!scriptPrompt) return;
-    setGenerating(true);
-    try {
-      const r = await api.generateScript(scriptPrompt, Math.max(2, selectedNames.length));
-      if (r.script_data) setScriptJson(JSON.stringify(r.script_data, null, 2));
-      setStatus('剧本已生成');
-    } catch (e: any) { setStatus(e.message); }
-    setGenerating(false);
+    setStatus('剧本杀模式正在开发中，敬请期待');
   };
 
   const startScript = async () => {
-    if (!scriptJson) { setStatus('请先生成剧本'); return; }
-    setLoading(true);
-    try {
-      const scriptData = JSON.parse(scriptJson);
-      const charNames: string[] = (scriptData.characters || []).map((c: any) => c.name);
-      const humanPlayers = roomPlayers;
-      await store.assignRoomCharacters(charNames);
-      await api.loadScript({ script_data: scriptData, human_players: humanPlayers });
-      await setMode('script');
-      await loadHistory();
-      goChat();
-    } catch (e: any) { setStatus(e.message); }
-    setLoading(false);
+    setStatus('剧本杀模式正在开发中，敬请期待');
   };
 
   const shortText = (t: string, n: number) => (t || '').length > n ? (t || '').slice(0, n) + '...' : (t || '');
