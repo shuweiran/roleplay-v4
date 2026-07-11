@@ -1,0 +1,17 @@
+.mic-btn {
+  font-size: 18px;
+  padding: 6px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  cursor: pointer;
+  transition: all 0.2s;
+  line-height: 1;
+}
+.mic-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: #667eea;
+}
+.mic-btn:active {
+  transform: scale(0.95);
+}

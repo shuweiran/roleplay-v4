@@ -1,0 +1,123 @@
+{
+  "version": "v4",
+  "session_id": "roleplay_20260709_192200",
+  "created_at": "2026-07-09T19:22:00.108349",
+  "updated_at": "2026-07-09T19:22:22.835385",
+  "round_count": 1,
+  "agent_names": [
+    "侦探"
+  ],
+  "config": {
+    "summary_interval": 10,
+    "model": "deepseek-v4-flash"
+  },
+  "summaries": [],
+  "structured_summaries": [],
+  "compressed_chunks": [],
+  "messages": [
+    {
+      "role": "system",
+      "name": "System",
+      "content": "角色扮演开始！\n角色1: 侦探\n点击「启动一轮」开始对话。",
+      "timestamp": "2026-07-09T19:22:00.108369",
+      "importance": 5,
+      "track_id": "main",
+      "visible_to": [
+        "侦探"
+      ],
+      "round_number": 0
+    },
+    {
+      "role": "system",
+      "name": "主控",
+      "content": "【场景】深夜酒吧\n一家藏在巷子深处的爵士酒吧，暧昧的红光笼罩着舞台，萨克斯手的旋律慵懒而忧伤。吧台后的调酒师手法娴熟，特调鸡尾酒有着让人忘记烦恼的魔力。这里的每个座位上都坐着一个有故事的人，他们的秘密和酒一样醇厚。",
+      "timestamp": "2026-07-09T19:22:00.108386",
+      "importance": 5,
+      "track_id": "main",
+      "visible_to": [
+        "侦探"
+      ],
+      "round_number": 0
+    },
+    {
+      "role": "system",
+      "name": "主控",
+      "content": "【场景变化】让苏折检查门锁",
+      "timestamp": "2026-07-09T19:22:15.258556",
+      "importance": 5,
+      "track_id": "main",
+      "visible_to": [
+        "侦探"
+      ],
+      "round_number": 0
+    },
+    {
+      "role": "agent",
+      "name": "侦探",
+      "content": "（靠在吧台边，目光追随着苏折检查门锁的动作，慢悠悠地吐出一口烟）有意思。门锁上有三处新的撬痕，但都没得手。看来有人急着要进来，却不想惊动里面的人。这种手法...像是急着找什么东西，而不是要人命。",
+      "timestamp": "2026-07-09T19:22:22.835372",
+      "importance": 5,
+      "track_id": "track_0",
+      "visible_to": [
+        "侦探"
+      ],
+      "round_number": 1
+    }
+  ],
+  "current_scene": "",
+  "current_tracks": [
+    {
+      "id": "track_0",
+      "agents": [
+        "侦探"
+      ],
+      "agent_actions": {
+        "侦探": "active"
+      },
+      "mode": "merged",
+      "color": "#4CAF50",
+      "label": "轨道1"
+    }
+  ],
+  "round_log": [
+    {
+      "round": 1,
+      "track_config": {
+        "round": 1,
+        "tracks": [
+          {
+            "id": "track_0",
+            "agents": [
+              "侦探"
+            ],
+            "agent_actions": {
+              "侦探": "active"
+            },
+            "mode": "merged",
+            "color": "#4CAF50",
+            "label": "轨道1"
+          }
+        ],
+        "description": "剧情紧张度低（新对话，无冲突酝酿），只有一个可用角色'侦探'，因此配置单人轨道，全员active。无需轮换考虑。"
+      },
+      "tasks": [
+        {
+          "agent_name": "侦探",
+          "task": "继续当前场景中的下一步行动，保持人设和已建立事实；不要擅自切换场景。你与同轨角色处在同一场景，可直接回应对方。只写侦探自己的台词、动作和判断。"
+        }
+      ],
+      "outputs": [
+        {
+          "agent_name": "侦探",
+          "content": "（靠在吧台边，目光追随着苏折检查门锁的动作，慢悠悠地吐出一口烟）有意思。门锁上有三处新的撬痕，但都没得手。看来有人急着要进来，却不想惊动里面的人。这种手法...像是急着找什么东西，而不是要人命。",
+          "content_length": 97
+        }
+      ],
+      "integration": {
+        "narration": "",
+        "scene_progress": ""
+      },
+      "timestamp": "2026-07-09T19:22:22.835401"
+    }
+  ]
+}

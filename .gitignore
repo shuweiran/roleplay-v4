@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+env/
+
+# Node
+node_modules/
+frontend/node_modules/
+frontend/dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Runtime data
+backend/data/sessions/
+backend/data/characters/
+backend/data/scenes/
+*.log
+server.log
+server_err.log
+stdout.txt
+stderr.txt
+
+# API keys (user-specific)
+backend/api_key.json
+
+# Test files
+test_*.json
+verify*.json
+gen*.json
+state_*.json
+test_agent.json
+vote.json
+
+# Temp files
+*.bak
+*.tmp
+*.temp

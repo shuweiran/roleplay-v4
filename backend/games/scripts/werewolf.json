@@ -1,0 +1,80 @@
+{
+  "name": "Werewolf",
+  "version": "1.0.0",
+  "description": "Classic Werewolf social deduction game.",
+  "player_range": [6, 18],
+  "roles": [
+    {
+      "name": "wolf",
+      "team": "werewolf",
+      "description": "Wakes at night and eliminates one villager.",
+      "max_count": 5,
+      "night_action": "choose_target"
+    },
+    {
+      "name": "seer",
+      "team": "villager",
+      "description": "Wakes at night and checks one player's identity.",
+      "max_count": 1,
+      "night_action": "check_identity"
+    },
+    {
+      "name": "witch",
+      "team": "villager",
+      "description": "Has one save potion and one kill potion. Can use each once per game at night.",
+      "max_count": 1,
+      "night_action": "use_potion"
+    },
+    {
+      "name": "hunter",
+      "team": "villager",
+      "description": "When eliminated, may shoot one player.",
+      "max_count": 1,
+      "night_action": null
+    },
+    {
+      "name": "guard",
+      "team": "villager",
+      "description": "Protects one player each night. Cannot protect the same player two nights in a row.",
+      "max_count": 1,
+      "night_action": "protect"
+    },
+    {
+      "name": "villager",
+      "team": "villager",
+      "description": "Ordinary villager with no special abilities.",
+      "max_count": 10,
+      "night_action": null
+    }
+  ],
+  "phases": [
+    {
+      "name": "night",
+      "order": 1,
+      "phase_type": "night",
+      "description": "Werewolves, seer, and witch act secretly."
+    },
+    {
+      "name": "day_discussion",
+      "order": 2,
+      "phase_type": "day_discussion",
+      "description": "Players discuss and debate who might be a werewolf."
+    },
+    {
+      "name": "day_vote",
+      "order": 3,
+      "phase_type": "day_vote",
+      "description": "Players vote to eliminate one suspected werewolf."
+    }
+  ],
+  "win_conditions": [
+    {
+      "team": "werewolf",
+      "description": "Werewolves win when the number of surviving wolves equals the number of surviving villagers."
+    },
+    {
+      "team": "villager",
+      "description": "Villagers win when all werewolves are eliminated."
+    }
+  ]
+}
