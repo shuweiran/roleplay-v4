@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>Phaser Stage2 Smoke — 剧本杀地图渲染冒烟</title>
+<style>
+  body { background: #0f172a; color: #e2e8f0; font-family: monospace; padding: 16px; }
+  #smoke-report { white-space: pre-wrap; font-size: 13px; line-height: 1.6; }
+  #host { border: 1px dashed #334155; margin: 8px 0; }
+  .pass { color: #34d399; } .fail { color: #ef4444; }
+</style>
+</head>
+<body>
+<div id="host"></div>
+<div id="smoke-report">RUNNING...</div>
+<script type="module">
+  import Phaser from 'phaser';
+  import * as React from 'react';
+  import { createRoot } from 'react-dom/client';
+  import { ScriptMapScene } from '/src/phaser/ScriptMapScene.ts';
+  import { PhaserScriptMapView } from '/src/phaser/PhaserScriptMapView.tsx';
+  import { normalizeMap } from '/src/phaser/mapData.ts';
+
+  const report = [];
+  const el = (id) => document.getElementById(id);
+  const ok = (name, pass, detail) => {
+    report.push(`[${pass ? 'PASS' : 'FAIL'}] ${name}${detail ? ' — ' + detail : ''}`);
+    el('smoke-report').innerHTML = report.join('\n');
+    document.body.setAttribute('data-smoke-ok', report.every(r => r.startsWith('[PASS]')) ? '1' : '0');
+  };
+  window.addEventListener('error', e => ok('no-js-error', false, e.message));
+
+  // ── 假地图：契约 v1 形状（10×8，2 热点 / 2 出生点 / 1 房间），带宽容解析缺口 ──
+  // 缺 map_version / tile_size / generator（缺省兜底 1 / 32 / undefined）；rooms 缺 tags
+  const fakeRawMap = {
+    map_id: 'smoke_01',
+    name: '冒烟宅',
+    theme: '契约 v1 冒烟',
+    width: 10,
+    height: 8,
+    layers: {
+      ground: [
+        [2,2,2,2,2,2,2,2,2,2],
+        [2,1,1,1,1,1,1,1,1,2],
+        [2,1,1,1,1,1,1,1,1,2],
+        [2,1,1,1,1,1,1,1,1,2],
+        [2,1,1,1,1,1,1,1,1,2],
+        [2,1,1,1,1,1,1,1,1,2],
+        [2,1,1,1,1,1,1,1,1,2],
+        [2,2,2,2,2,2,2,2,2,2],
+      ],
+      collision: [
+        [1,1,1,1,1,1,1,1,1,1],
+        [1,0,0,0,0,0,0,0,0,1],
+        [1,0,0,0,0,0,0,0,0,1],
+        [1,0,0,0,0,0,0,0,0,1],
+        [1,0,0,0,0,0,0,0,0,1],
+        [1,0,0,0,0,0,0,0,0,1],
+        [1,0,0,0,0,0,0,0,0,1],
+        [1,1,1,1,1,1,1,1,1,1],
+      ],
+    },
+    rooms: [
+      { id: 'room_main', name: '客厅', x: 1, y: 1, w: 8, h: 6 },
+    ],
+    zones: [
+      { id: 'z_table', name: '八仙桌', type: 'search', x: 3, y: 3, radius: 1, clue_location: '客厅' },
+      { id: 'z_shelf', name: '书架', type: 'search', x: 6, y: 3, radius: 1, clue_location: '书房' },
+    ],
+    spawn_points: [
+      { id: 'sp_me', type: 'player', x: 4, y: 4 },
+      { id: 'sp_npc', type: 'npc', x: 5, y: 4 },
+    ],
+  };
+
+  const searchedZones = [];
+  let onSearchCalls = 0;
+  let onPlayerMoveCalls = 0;
+  let lastMoveGx = -1, lastMoveGy = -1;
+  const callbacks = {
+    onSearch: (zone) => { onSearchCalls++; searchedZones.push(zone.id); },
+    onPlayerMove: (gx, gy) => { onPlayerMoveCalls++; lastMoveGx = gx; lastMoveGy = gy; },
+  };
+
+  let game = null;
+  const makeGame = () => {
+    game = new Phaser.Game({
+      type: Phaser.AUTO,
+      parent: 'host',
+      width: 800, height: 560,
+      backgroundColor: '#0f172a',
+      scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH, width: 800, height: 560 },
+      physics: { default: 'arcade', arcade: { gravity: { x: 0, y: 0 }, debug: false } },
+      scene: [new ScriptMapScene(normalizeMap(fakeRawMap) ?? fakeRawMap, callbacks)],
+      banner: false,
+    });
+  };
+  const scene = () => game.scene.getScene('ScriptMapScene');
+
+  async function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
+  async function waitScene() {
+    for (let i = 0; i < 50; i++) {
+      const s = game.scene.getScene('ScriptMapScene');
+      if (s && typeof s.isReady === 'function' && s.isReady()) return s;
+      await wait(100);
+    }
+    try { game.scene.start('ScriptMapScene'); } catch (e) { /* ignore */ }
+    for (let i = 0; i < 50; i++) {
+      const s = game.scene.getScene('ScriptMapScene');
+      if (s && typeof s.isReady === 'function' && s.isReady()) return s;
+      await wait(100);
+    }
+    throw new Error('Scene create() 未完成');
+  }
+
+  async function run() {
+    try {
+      // 1. Phaser 版本
+      ok('phaser-version', /^3\.90\./.test(Phaser.VERSION), Phaser.VERSION);
+
+      // 2. normalizeMap 宽容解析（缺 map_version/tile_size → 1/32；缺 tags → []）
+      const norm = normalizeMap(fakeRawMap);
+      ok('normalize-map',
+        !!norm && norm.map_version === 1 && norm.tile_size === 32 &&
+        norm.width === 10 && norm.height === 8 &&
+        norm.zones.length === 2 && norm.spawn_points.length === 2 &&
+        norm.rooms[0].tags.length === 0,
+        `map_version=${norm && norm.map_version} tile_size=${norm && norm.tile_size} zones=${norm && norm.zones.length} rooms_tags=${norm && norm.rooms[0].tags.length}`);
+
+      // 3. 创建 Game + Scene 激活
+      makeGame();
+      const sc1 = await waitScene();
+      ok('game-create', !!game && game.isRunning, 'Phaser.Game 创建并运行, scene=' + (sc1 ? 'yes' : 'no'));
+
+      // 4. 地图渲染统计（getStats）
+      const st = sc1.getStats();
+      ok('map-stats',
+        st.zones === 2 && st.spawns === 2 && st.rooms === 1 && st.width === 10 && st.height === 8,
+        `zones=${st.zones} spawns=${st.spawns} rooms=${st.rooms} ${st.width}×${st.height}`);
+
+      // 5. 内部结构：tilemap 已建（b.map）+ 玩家精灵已建（player）+ 碰撞层存在
+      const priv = sc1;
+      const tilemapOk = !!priv.b && !!priv.b.map && priv.b.ts === 32;
+      const playerOk = !!priv.player && typeof priv.player.setVelocity === 'function';
+      ok('tilemap-player',
+        tilemapOk && playerOk,
+        `tilemap=${tilemapOk} ts=${priv.b && priv.b.ts} player+setVelocity=${playerOk}`);
+      // 等几帧：Phaser 3.90 ProcessQueue 中 collider 先入 _pending，world.step 后转入 _active
+      await wait(400);
+      const colliderCount = priv.physics.world.colliders ? priv.physics.world.colliders.getActive().length : -1;
+      ok('collider-registered', colliderCount >= 1, `arcade colliders=${colliderCount}`);
+
+      // 6. 玩家物理：setCollideWorldBounds + body.setCircle 生效（body 非空、circle 半径≈ts*0.3）
+      const body = priv.player.body;
+      ok('player-body',
+        !!body && typeof body.setCircle === 'function',
+        body ? 'body ok' : 'body NULL（arcade body 未挂载）');
+      if (body) {
+        ok('player-circle', body.halfWidth > 0 && Math.abs(body.halfWidth - (priv.b.ts * 0.3)) < 2,
+          `halfWidth=${body.halfWidth}（期望≈${priv.b.ts * 0.3}）`);
+      } else {
+        ok('player-circle', false, 'body NULL');
+      }
+      ok('player-collide-bounds', !!priv.player.body && priv.player.body.collideWorldBounds === true,
+        'setCollideWorldBounds(true) 已生效（body.collideWorldBounds=true）');
+
+      // 7. 移动：按住 A（真实 WASD 路径）→ 游戏循环 update() 应给负 x 速度（验证 keys 接线 + setVelocity）
+      const keysObj = priv.registry.get('keys');
+      let pressed = false;
+      if (keysObj && keysObj.A) { keysObj.A.isDown = true; pressed = true; }
+      await wait(250);
+      let vel = priv.player.body ? priv.player.body.velocity : null;
+      let vxDiag = vel ? vel.x : null;
+      // 若游戏循环在 headless 下未驱动 update()，手动驱动一次验证 update() 内的 WASD 逻辑本身
+      if (!(vel && vel.x < -50)) {
+        try { priv.update(); } catch (e) { /* ignore */ }
+        vel = priv.player.body ? priv.player.body.velocity : null;
+        vxDiag = vel ? vel.x : null;
+      }
+      ok('player-velocity', pressed && !!vel && vxDiag < -50,
+        `按住A后 velocity.x=${vxDiag}（期望 < -50；keys接线=${pressed}）`);
+      if (keysObj && keysObj.A) { keysObj.A.isDown = false; }
+
+      // 8. 热点搜证回调（interact → callbacks.onSearch；zone 带 clue_location）
+      priv.interact(priv.mapJson.zones[0]);
+      ok('on-search-cb', onSearchCalls === 1 && searchedZones[0] === 'z_table',
+        `onSearch 调用=${onSearchCalls} zone=${searchedZones[0]}`);
+
+      // 9. 已搜证热点变绿（markZoneSearched → label color #3ddc84）
+      priv.markZoneSearched('z_table');
+      const label = priv.zoneLabels.find(t => t.getData('zoneId') === 'z_table');
+      ok('mark-searched',
+        !!label && label.style.color === '#3ddc84',
+        label ? 'label color=' + label.style.color : 'label 未找到');
+
+      // 10. 重复搜证被拦截（zoneStates 命中 → hint 提示已搜证，不再回调）
+      const callsBefore = onSearchCalls;
+      priv.interact(priv.mapJson.zones[0]);
+      ok('search-dedupe', onSearchCalls === callsBefore, `重复 interact 不再触发 onSearch（调用数=${onSearchCalls}）`);
+
+      // 11. 玩家碰撞世界边界 + 瓦片碰撞层存在（碰撞网格 putTileAt 已写入）
+      const collTiles = priv.b.map.layers ? priv.b.map.layers.length : 0;
+      ok('tile-layers', collTiles >= 2, `tilemap layers=${collTiles}（地面+碰撞）`);
+
+      // 12. P-0803-E 相机跟随：setBounds + startFollow（跟随玩家精灵）
+      const cam = sc1.cameras.main;
+      const camAny = cam;
+      const boundsOk = !!camAny._bounds && camAny._bounds.width === 10 * 32 && camAny._bounds.height === 8 * 32;
+      const followOk = camAny._follow === sc1.player;
+      ok('camera-follow', boundsOk && followOk,
+        `bounds=${camAny._bounds && camAny._bounds.width + 'x' + camAny._bounds.height} follow=${camAny._follow === sc1.player}`);
+
+      // 13. P-0803-E 滚轮缩放：向下滚（dy<0）→ zoom 增大（baseZoom=1 → 1.12），Clamp 上下限
+      const baseZoom = sc1.baseZoom;
+      try { sc1.input.emit('wheel', null, null, 0, -100, 0); } catch (e) { /* ignore */ }
+      const zoomAfter = cam.zoom;
+      ok('wheel-zoom', zoomAfter > baseZoom && zoomAfter <= baseZoom * 2,
+        `zoom=${zoomAfter.toFixed(3)}（base=${baseZoom.toFixed(3)}，期望 > base 且 ≤2×）`);
+      // 上限 Clamp：连滚 30 次放大不超 2×baseZoom
+      for (let i = 0; i < 30; i++) { try { sc1.input.emit('wheel', null, null, 0, -100, 0); } catch (e) { /* ignore */ } }
+      ok('wheel-zoom-clamp', cam.zoom <= baseZoom * 2 + 0.001, `放大 30 次后 zoom=${cam.zoom.toFixed(3)}（上限=${(baseZoom * 2).toFixed(3)}）`);
+
+      // 14. P-0803-E onPlayerMove：已收到格坐标回调 + 节流生效（位置未变不重复回调）
+      const movesBefore = onPlayerMoveCalls;
+      try { sc1.update(); } catch (e) { /* ignore */ }
+      ok('on-player-move', onPlayerMoveCalls >= 1 && onPlayerMoveCalls === movesBefore,
+        `回调=${onPlayerMoveCalls} 位置=(${lastMoveGx},${lastMoveGy})（已收到+位置未变→节流不重复）`);
+
+      // 15. destroy 收敛 + 重建（StrictMode double-mount 模拟）
+      // headless virtual-time 下 RAF 不驱动 runDestroy，手动驱动一次验证收敛路径（阶段 1 同语义）
+      try {
+        const g0 = game;
+        g0.destroy(true);
+        const pending = g0.pendingDestroy === true;
+        let runDestroyOk = true;
+        try { if (typeof g0.runDestroy === 'function') g0.runDestroy(); } catch (e) { runDestroyOk = false; }
+        await wait(300);
+        const removed = document.querySelectorAll('#host canvas').length === 0;
+        ok('game-destroy', pending && runDestroyOk && removed,
+          `destroy 收敛（pendingDestroy=${pending} runDestroy=${runDestroyOk} canvas移除=${removed}）`);
+      } catch (e) {
+        ok('game-destroy', false, 'destroy 异常: ' + (e && e.message));
+      }
+      makeGame();
+      await waitScene();
+      const st2 = scene().getStats();
+      ok('game-recreate', st2.zones === 2, `重建后渲染正常 zones=${st2.zones}`);
+
+      // 16. P-0803-E React 视图：PhaserScriptMapView（小地图 canvas + 全屏按钮 + Phaser host）
+      try {
+        const reactHost = document.createElement('div');
+        reactHost.id = 'react-host';
+        document.body.appendChild(reactHost);
+        const root = createRoot(reactHost);
+        root.render(React.createElement(PhaserScriptMapView, {
+          map: normalizeMap(fakeRawMap) ?? fakeRawMap,
+          playerName: 'smoke',
+          height: 300,
+        }));
+        await wait(800);
+        const view = document.querySelector('.script-map-view');
+        const mini = document.querySelector('.mini-map-canvas');
+        const fullBtn = [...document.querySelectorAll('button')].find(b => b.textContent && b.textContent.includes('全屏'));
+        const canvasCount = reactHost.querySelectorAll('canvas').length; // Phaser canvas + mini canvas
+        ok('react-view-minimap', !!view && !!mini && mini.width > 0,
+          `view=${!!view} mini=${!!mini} miniW=${mini && mini.width}`);
+        ok('react-view-fullscreen-btn', !!fullBtn && fullBtn.textContent.includes('全屏'),
+          fullBtn ? '按钮=' + fullBtn.textContent.trim() : '按钮未找到');
+        ok('react-view-phaser-host', canvasCount >= 2, `react host canvas 数=${canvasCount}（Phaser+mini ≥2）`);
+        root.unmount();
+        reactHost.remove();
+      } catch (e) {
+        ok('react-view-minimap', false, 'React 视图异常: ' + (e && e.message));
+        ok('react-view-fullscreen-btn', false, '同异常');
+        ok('react-view-phaser-host', false, '同异常');
+      }
+      game.destroy(true);
+      game = null;
+
+      const allPass = report.every(r => r.startsWith('[PASS]'));
+      ok('smoke-overall', allPass, allPass ? '阶段 2 地图渲染冒烟全部通过' : '存在 FAIL 项');
+    } catch (e) {
+      ok('smoke-overall', false, '异常: ' + (e && e.message) + ' || ' + (e && e.stack ? String(e.stack).split('\n').slice(0, 2).join(' <- ') : ''));
+    }
+    document.title = report.every(r => r.startsWith('[PASS]')) ? 'ALL PASS' : 'FAIL';
+    document.body.setAttribute('data-smoke-ok', report.every(r => r.startsWith('[PASS]')) ? '1' : '0');
+  }
+
+  run();
+</script>
+</body>
+</html>

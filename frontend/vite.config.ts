@@ -10,6 +10,11 @@ export default defineConfig({
         target: 'http://localhost:8000',
         changeOrigin: true,
       },
+      // 2D simulation page is served by the Java backend (classpath:/static/simulation.html)
+      '/simulation.html': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
     },
   },
 })

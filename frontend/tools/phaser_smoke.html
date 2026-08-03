@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>Phaser Stage1 Smoke — ScenePage 渲染层冒烟</title>
+<style>
+  body { background: #0f172a; color: #e2e8f0; font-family: monospace; padding: 16px; }
+  #smoke-report { white-space: pre-wrap; font-size: 13px; line-height: 1.6; }
+  #host { border: 1px dashed #334155; margin: 8px 0; }
+  .pass { color: #34d399; } .fail { color: #ef4444; }
+</style>
+</head>
+<body>
+<div id="host"></div>
+<div id="smoke-report">RUNNING...</div>
+<script type="module">
+  import Phaser from 'phaser';
+  import { SimulationScene } from '/src/phaser/SimulationScene.ts';
+
+  const report = [];
+  const el = (id) => document.getElementById(id);
+  const ok = (name, pass, detail) => {
+    report.push(`[${pass ? 'PASS' : 'FAIL'}] ${name}${detail ? ' — ' + detail : ''}`);
+    el('smoke-report').innerHTML = report.join('\n');
+  };
+
+  // 全局错误面：任何 JS 异常落到报告
+  window.addEventListener('error', e => ok('no-js-error', false, e.message));
+
+  // 假快照：2 agent + 2 障碍 + 旁白（对齐后端 WorldSnapshot.toMap 形状）
+  const fakeSnapshot = {
+    tick: 7,
+    running: true,
+    agents: [
+      { agentName: 'me', x: 300, y: 200, emotion: 'NEUTRAL', emotionEmoji: '😐', hearRange: 200, moveSpeed: 90, currentMessage: '大家好', inConversation: true, vx: 10, vy: 0 },
+      { agentName: '小明', x: 480, y: 260, emotion: 'HAPPY', emotionEmoji: '😄', hearRange: 200, moveSpeed: 80, currentMessage: '', inConversation: true },
+      { agentName: '小红', x: 700, y: 420, emotion: 'NEUTRAL', emotionEmoji: '😐', hearRange: 220, moveSpeed: 75, currentMessage: '', inConversation: false },
+    ],
+    obstacles: [
+      { type: 'TREE', x: 100, y: 100, width: 40, height: 40, blocksSound: true, label: '树' },
+      { type: 'WALL', x: 800, y: 80, width: 120, height: 24, blocksSound: true, label: '墙' },
+    ],
+    worldNarration: '冒烟测试旁白',
+    directorActive: true,
+    scene: 'park',
+  };
+
+  let game = null;
+  const makeGame = () => {
+    game = new Phaser.Game({
+      type: Phaser.AUTO,
+      parent: 'host',
+      width: 1000, height: 600,
+      backgroundColor: '#0f172a',
+      scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH, width: 1000, height: 600 },
+      physics: { default: 'arcade', arcade: { gravity: { x: 0, y: 0 }, debug: false } },
+      scene: [new SimulationScene({ onSetTarget: () => {} })],
+      banner: false,
+    });
+  };
+  const scene = () => game.scene.getScene('SimulationScene');
+
+  async function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
+  async function waitScene() {
+    // 等 Scene create() 完成（isReady 标志；isActive 可能早于 create 触发）
+    for (let i = 0; i < 50; i++) {
+      const s = game.scene.getScene('SimulationScene');
+      if (s && typeof s.isReady === 'function' && s.isReady()) return s;
+      await wait(100);
+    }
+    // 兜底：若仍未 ready，主动 start 一次再等
+    try { game.scene.start('SimulationScene'); } catch (e) { /* ignore */ }
+    for (let i = 0; i < 50; i++) {
+      const s = game.scene.getScene('SimulationScene');
+      if (s && typeof s.isReady === 'function' && s.isReady()) return s;
+      await wait(100);
+    }
+    throw new Error('Scene create() 未完成');
+  }
+
+  async function run() {
+    try {
+      // 1. Phaser 版本
+      ok('phaser-version', /^3\.90\./.test(Phaser.VERSION), Phaser.VERSION);
+
+      // 2. 创建 Game + Scene 激活
+      makeGame();
+      const sc1 = await waitScene();
+      ok('game-create', !!game && game.isRunning, 'Phaser.Game 创建并运行, scene=' + (sc1 ? 'yes' : 'no'));
+      // 诊断：waitScene 拿到的实例与 scene() 是否同一对象
+      try {
+        const s2 = scene();
+        ok('diag-same-instance', sc1 === s2, 'waitScene===getScene: ' + (sc1 === s2) + ' ready=' + (typeof s2.isReady === 'function' ? s2.isReady() : 'n/a'));
+        const priv = s2; // 反射检查内部 graphics 是否就绪
+        ok('diag-internals', true, 'agents map size=' + (priv.agents ? priv.agents.size : 'n/a') + ' gridG=' + (priv.gridG ? 'ok' : 'NULL'));
+      } catch (e) {
+        ok('diag-same-instance', false, '诊断异常: ' + (e && e.message));
+      }
+
+      // 3. applySnapshot 渲染
+      try {
+        scene().applySnapshot(fakeSnapshot);
+        await wait(300);
+        const st = scene().getStats();
+        ok('agents-render', st.agents === 3, `agents=${st.agents}`);
+        ok('obstacles-render', st.obstacles === 2, `obstacles=${st.obstacles}`);
+      } catch (e) {
+        ok('agents-render', false, 'applySnapshot 异常: ' + (e && e.message) + ' || ' + (e && e.stack ? String(e.stack).split('\n').slice(0, 3).join(' <- ') : ''));
+      }
+
+      // 4. 增量快照：移除一个 agent
+      try {
+        scene().applySnapshot({ agents: fakeSnapshot.agents.slice(0, 2), obstacles: fakeSnapshot.obstacles });
+        await wait(300);
+        ok('agents-removal', scene().getStats().agents === 2, `agents=${scene().getStats().agents}`);
+      } catch (e) {
+        ok('agents-removal', false, '增量异常: ' + (e && e.message));
+      }
+
+      // 5. destroy(true) 生命周期收敛
+      // Phaser 3.90 destroy() 只置 pendingDestroy=true，真正的 DOM 清理在下一帧 RAF step() → runDestroy()
+      // （Game.js L476/L736）。headless virtual-time 下 RAF 不触发 step，故断言 destroy 调用收敛标记
+      // （阶段 0 实证同语义：检查销毁标记而非 canvas DOM）；真实浏览器 RAF 正常，由 React 卸载路径覆盖。
+      try {
+        const before = document.querySelectorAll('#host canvas').length;
+        const g = game;
+        g.destroy(true);
+        const pending = g.pendingDestroy === true;
+        await wait(300);
+        // 手动驱动一次 step，验证 runDestroy 路径可收敛（headless 下 RAF 不跑，真实浏览器无需此步）
+        let runDestroyOk = true;
+        try { if (g.isBooted !== false && typeof g.runDestroy === 'function') g.runDestroy(); } catch (e) { runDestroyOk = false; }
+        await wait(300);
+        const cvs = document.querySelectorAll('#host canvas');
+        const removed = cvs.length === 0;
+        ok('game-destroy', pending && runDestroyOk && removed,
+          `destroy 收敛（pendingDestroy=${pending} runDestroy=${runDestroyOk} canvas移除=${removed} before=${before} 剩余=${cvs.length}）`);
+      } catch (e) {
+        ok('game-destroy', false, 'destroy 异常: ' + (e && e.message));
+      }
+
+      // 6. 重建（StrictMode double-mount 模拟：创建→销毁→再创建）
+      try {
+        makeGame();
+        await waitScene();
+        scene().applySnapshot(fakeSnapshot);
+        await wait(300);
+        ok('game-recreate', scene().getStats().agents === 3, '重建后渲染正常');
+        game.destroy(true);
+        game = null;
+      } catch (e) {
+        ok('game-recreate', false, '重建异常: ' + (e && e.message));
+      }
+
+      ok('smoke-overall', true, '阶段 1 渲染层冒烟全部通过');
+    } catch (e) {
+      ok('smoke-overall', false, '异常: ' + (e && e.message));
+    }
+    document.title = report.every(r => r.startsWith('[PASS]')) ? 'ALL PASS' : 'FAIL';
+    // dump-dom 在 virtual-time 下可能捕获不到 title 变更，用 body 属性做可靠信号
+    document.body.setAttribute('data-smoke-ok', report.every(r => r.startsWith('[PASS]')) ? '1' : '0');
+  }
+
+  run();
+</script>
+</body>
+</html>

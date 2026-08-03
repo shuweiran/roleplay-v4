@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>Phaser Stage1 Integration Smoke — 真实后端数据流</title>
+<style>
+  body { background: #0f172a; color: #e2e8f0; font-family: monospace; padding: 16px; }
+  #smoke-report { white-space: pre-wrap; font-size: 13px; line-height: 1.6; margin-top: 8px; }
+  .pass { color: #34d399; } .fail { color: #ef4444; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<div id="smoke-report">RUNNING...</div>
+<script type="module">
+  import Phaser from 'phaser';
+  import { SimulationScene } from '/src/phaser/SimulationScene.ts';
+  import { normalizeSnapshot } from '/src/phaser/simulationData.ts';
+  import React from 'react';
+  import { createRoot } from 'react-dom/client';
+  import { PhaserSimulationView } from '/src/phaser/PhaserSimulationView.tsx';
+
+  const report = [];
+  const el = (id) => document.getElementById(id);
+  const ok = (name, pass, detail) => {
+    report.push(`[${pass ? 'PASS' : 'FAIL'}] ${name}${detail ? ' — ' + detail : ''}`);
+    el('smoke-report').innerHTML = report.join('\n');
+    document.body.setAttribute('data-smoke-ok', report.every(r => r.startsWith('[PASS]')) ? '1' : '0');
+  };
+  window.addEventListener('error', e => ok('no-js-error', false, e.message));
+
+  let game = null;
+  const makeGame = () => {
+    game = new Phaser.Game({
+      type: Phaser.AUTO,
+      parent: 'root',
+      width: 1000, height: 600,
+      backgroundColor: '#0f172a',
+      scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH, width: 1000, height: 600 },
+      physics: { default: 'arcade', arcade: { gravity: { x: 0, y: 0 }, debug: false } },
+      scene: [new SimulationScene({ onSetTarget: () => {} })],
+      banner: false,
+    });
+  };
+  const scene = () => game.scene.getScene('SimulationScene');
+  async function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
+  async function waitScene() {
+    for (let i = 0; i < 50; i++) {
+      const s = game.scene.getScene('SimulationScene');
+      if (s && typeof s.isReady === 'function' && s.isReady()) return s;
+      await wait(100);
+    }
+    throw new Error('Scene create() 未完成');
+  }
+
+  async function run() {
+    try {
+      makeGame();
+      await waitScene();
+      ok('game-create', true, 'Phaser.Game 创建并运行');
+
+      // 真实后端数据流 1：POST /api/simulation/load-characters（2 角色 → park）
+      const chars = [
+        { name: '苏哲', persona: '开朗外向的年轻人', voice: '说话轻松', background: '程序员' },
+        { name: '林诗', persona: '温柔细心的女孩', voice: '轻声细语', background: '学生' },
+      ];
+      let lcResp = '';
+      try {
+        const lc = await fetch('/api/simulation/load-characters', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ characters: chars, scene: 'park' }),
+        });
+        lcResp = lc.status + ' ' + (await lc.text()).slice(0, 200);
+      } catch (e) {
+        lcResp = 'fetch-exception ' + (e && e.message);
+      }
+      ok('load-characters', lcResp.startsWith('200'), 'POST /load-characters → ' + lcResp);
+
+      // 真实后端数据流 2：POST /api/simulation/start
+      const st = await fetch('/api/simulation/start', { method: 'POST' });
+      ok('sim-start', st.status === 200, 'POST /start status=' + st.status);
+
+      // 真实后端数据流 3：GET /api/simulation/state → applySnapshot
+      await wait(1500); // 等后端 tick 几帧
+      const sr = await fetch('/api/simulation/state');
+      const state = await sr.json();
+      const norm = normalizeSnapshot(state);
+      ok('state-fetch', sr.status === 200 && Array.isArray(norm.agents), 'GET /state status=' + sr.status + ' agents=' + (norm.agents || []).length);
+      scene().applySnapshot(norm);
+      await wait(300);
+      const st1 = scene().getStats();
+      ok('agents-render', st1.agents === (norm.agents || []).length, `渲染 agents=${st1.agents}（后端 ${(norm.agents || []).length}）`);
+
+      // 真实后端数据流 4：SSE /api/simulation/events world_snapshot 增量
+      const sseOk = await new Promise((resolve) => {
+        const es = new EventSource('/api/simulation/events');
+        const t0 = Date.now();
+        const timer = setTimeout(() => { es.close(); resolve(false); }, 6000);
+        es.addEventListener('world_snapshot', (e) => {
+          try {
+            const d = JSON.parse(e.data);
+            if (d && d.agents && d.agents.length > 0) {
+              scene().applySnapshot(d);
+              clearTimeout(timer);
+              es.close();
+              resolve(true);
+            }
+          } catch { /* ignore */ }
+        });
+      });
+      ok('sse-incremental', sseOk, 'SSE world_snapshot 增量接收并渲染');
+
+      // destroy 收敛
+      game.destroy(true);
+      await wait(300);
+      ok('game-destroy', true, 'destroy(true) 收敛');
+
+      // ── React 组件层验证：PhaserSimulationView（ScenePage 集成同一组件） ──
+      try {
+        const host2 = document.createElement('div');
+        host2.id = 'react-host';
+        document.body.appendChild(host2);
+        const root = createRoot(host2);
+        const chars = [
+          { name: '苏哲', persona: '开朗外向的年轻人', voice: '说话轻松', background: '程序员' },
+          { name: '林诗', persona: '温柔细心的女孩', voice: '轻声细语', background: '学生' },
+        ];
+        // StrictMode 双挂载（与 main.tsx 一致）——验证 Phaser Game 在 React 生命周期下收敛
+        root.render(React.createElement(React.StrictMode, null,
+          React.createElement(PhaserSimulationView, { characters: chars, scene: 'park', height: 300 })
+        ));
+        await wait(3500); // 等组件挂载 + 后端 load/start/SSE
+        const canvas = host2.querySelectorAll('canvas').length;
+        ok('react-view-canvas', canvas >= 1, `PhaserSimulationView 在 React 中挂载 canvas=${canvas}`);
+        const st2 = await fetch('/api/simulation/state');
+        const d2 = await st2.json();
+        ok('react-view-data', st2.status === 200 && (d2.agents || []).length >= 2, `组件数据流 agents=${(d2.agents || []).length}`);
+        root.unmount();
+        host2.innerHTML = '';
+        await wait(800);
+        const canvasAfter = host2.querySelectorAll('canvas').length;
+        ok('react-view-unmount', canvasAfter === 0, `unmount 后 canvas 移除（剩余 ${canvasAfter}）`);
+        host2.remove();
+      } catch (e) {
+        ok('react-view-canvas', false, 'React 组件挂载异常: ' + (e && e.message) + ' || ' + (e && e.stack ? String(e.stack).split('\n').slice(0, 2).join(' <- ') : ''));
+      }
+
+      // 真实后端数据流 5：POST /api/simulation/stop
+      try {
+        const sp = await fetch('/api/simulation/stop', { method: 'POST' });
+        ok('sim-stop', sp.status === 200, 'POST /stop status=' + sp.status);
+      } catch (e) {
+        ok('sim-stop', false, 'POST /stop 异常: ' + (e && e.message));
+      }
+
+      const allPass = report.every(r => r.startsWith('[PASS]'));
+      ok('integration-overall', allPass, allPass ? '真实后端数据流冒烟全部通过' : '存在 FAIL 项');
+    } catch (e) {
+      ok('integration-overall', false, '异常: ' + (e && e.message) + ' || ' + (e && e.stack ? String(e.stack).split('\n').slice(0, 2).join(' <- ') : ''));
+    }
+  }
+
+  run();
+</script>
+</body>
+</html>

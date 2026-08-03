@@ -74,12 +74,23 @@ export function SettingsPage() {
     if (!charFormName.trim()) return;
     try {
       if (editingChar) {
-        await api.updateCharacter(editingChar.name, {
-          name: charFormName.trim(),
-          persona: charFormPersona,
-          voice: charFormVoice,
-        });
+        const isBound = editingChar.player_id === store.playerId || editingChar.name === store.boundCharacterName;
+        if (isBound && charFormName.trim() !== editingChar.name) {
+          // P-0802-P4（改造方案 §4.1）：玩家本人角色（已绑定 player_id）改名 → 改调局中改名端点
+          // （角色库改名 + 四处运行态同步 + 撞名校验② + 失败回滚）
+          await api.playerRename(editingChar.name, charFormName.trim());
+          store.setBoundCharacterName(charFormName.trim());
+          if (store.currentPlayer === editingChar.name) store.setCurrentPlayer(charFormName.trim());
+        } else {
+          // 非绑定角色改名 / 绑定角色编辑资料（不改名）→ 仍走原 PUT（client.ts 按绑定状态决定是否携带 player_id）
+          await api.updateCharacter(editingChar.name, {
+            name: charFormName.trim(),
+            persona: charFormPersona,
+            voice: charFormVoice,
+          });
+        }
       } else {
+        // P-0802-P4：新建角色 —— 当前无绑定角色时自动绑定为「玩家本人角色」，之后创建的不携带 player_id（见 client.ts）
         await api.createCharacter({
           name: charFormName.trim(),
           persona: charFormPersona,

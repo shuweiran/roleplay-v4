@@ -1,0 +1,176 @@
+/**
+ * simulationData.ts — Phaser 渲染层数据适配（阶段 1）
+ *
+ * 职责：把后端 /api/simulation/*（REST + SSE world_snapshot）的原始载荷
+ * 归一为渲染层对象。数据流不变——本文件只做形状适配，不改变任何后端契约。
+ *
+ * 对应：docs/Phaser迁移计划.md 阶段 1；D-020 结构性前提（后端权威模拟 + 前端纯渲染）。
+ */
+
+/** 后端 AgentState.toMap() 的子集（渲染需要的最小字段，宽容解析） */
+export interface SimAgent {
+  agentName: string;
+  x: number;
+  y: number;
+  emotion?: string;
+  emotionEmoji?: string;
+  hearRange?: number;
+  moveSpeed?: number;
+  currentMessage?: string;
+  inConversation?: boolean;
+  hasTarget?: boolean;
+  targetX?: number;
+  targetY?: number;
+  stance?: string;
+  attention?: number;
+  playerControlled?: boolean;
+  manualTarget?: boolean;
+  vx?: number;
+  vy?: number;
+}
+
+/** 后端 Obstacle.toMap() 子集 */
+export interface SimObstacle {
+  type: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  blocksSound?: boolean;
+  label?: string;
+}
+
+/** 后端 WorldSnapshot.toMap() / GET /api/simulation/state 的子集 */
+export interface SimSnapshot {
+  tick?: number;
+  agents?: SimAgent[];
+  obstacles?: SimObstacle[];
+  timestamp?: number;
+  worldNarration?: string;
+  directorActive?: boolean;
+  scene?: string;
+  running?: boolean;
+  agentCount?: number;
+  recentConversations?: unknown[];
+}
+
+/** 对话组（conversation-status 载荷子集） */
+export interface SimGroup {
+  /** P-0803-G：组 ID（后端 ConversationGroup.getGroupId，join/leave 端点路径参数；旧后端/缺省时不提供） */
+  id?: string;
+  mode?: string;
+  participants?: string[];
+  rounds?: number;
+  turns?: number;
+  /** P-0803-G：组空闲毫秒数（后端 30s idle 自动解散，前端展示/判断可参考） */
+  idleMs?: number;
+  topic?: { description?: string };
+}
+
+/* ── 视觉常量（与 static/simulation.html 自研 Canvas 渲染保持一致，无回归） ── */
+
+export const WORLD_W = 1000;
+export const WORLD_H = 600;
+
+export const AGENT_COLORS = [
+  '#38bdf8', '#f472b6', '#a78bfa', '#34d399', '#fb923c', '#f87171', '#e879f9', '#2dd4bf',
+];
+
+/** 与 simulation.html agentColor() 相同的哈希取色（保证视觉不变） */
+export function agentColor(name: string): string {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = ((h << 5) - h) + name.charCodeAt(i);
+  return AGENT_COLORS[Math.abs(h) % AGENT_COLORS.length];
+}
+
+/** 障碍类型 → 填充色（与 simulation.html draw() 的映射一致） */
+export function obstacleColor(type: string): string {
+  switch (type) {
+    case 'BUILDING': case 'WALL': return '#334155';
+    case 'WATER': return '#1e3a5f';
+    case 'TABLE': return '#4a3728';
+    case 'TREE': return '#064e3b';
+    case 'ROCK': return '#57534e';
+    case 'BUSH': return '#14532d';
+    case 'BENCH': return '#78350f';
+    case 'FOUNTAIN': return '#1e40af';
+    default: return '#3f3f46';
+  }
+}
+
+/** 对话模式 → 群组框颜色（与 simulation.html 一致） */
+export function groupModeColor(mode: string): string {
+  switch (mode) {
+    case 'GROUP_DISCUSSION': return '#a78bfa';
+    case 'PUBLIC_SPEAKING': return '#fbbf24';
+    case 'DEBATE': return '#ef4444';
+    default: return '#38bdf8';
+  }
+}
+
+/** 可用场景列表（与后端 Obstacle.availableScenes() 一致，仅渲染侧展示用） */
+export const AVAILABLE_SCENES = ['park', 'city', 'cafe', 'forest', 'classroom', 'beach'];
+
+/* ── 宽容解析辅助（对齐 D-014 纪律：缺省兜底，不崩） ── */
+
+export function normalizeAgent(raw: unknown): SimAgent | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const a = raw as Record<string, unknown>;
+  const name = String(a.agentName ?? '');
+  if (!name) return null;
+  return {
+    agentName: name,
+    x: Number(a.x ?? 0),
+    y: Number(a.y ?? 0),
+    emotion: String(a.emotion ?? ''),
+    emotionEmoji: String(a.emotionEmoji ?? '😐'),
+    hearRange: Number(a.hearRange ?? 200),
+    moveSpeed: Number(a.moveSpeed ?? 80),
+    currentMessage: typeof a.currentMessage === 'string' ? a.currentMessage : '',
+    inConversation: Boolean(a.inConversation),
+    hasTarget: Boolean(a.hasTarget),
+    targetX: a.targetX !== undefined ? Number(a.targetX) : undefined,
+    targetY: a.targetY !== undefined ? Number(a.targetY) : undefined,
+    stance: String(a.stance ?? 'neutral'),
+    attention: Number(a.attention ?? 0),
+    playerControlled: Boolean(a.playerControlled),
+    manualTarget: Boolean(a.manualTarget),
+    vx: a.vx !== undefined ? Number(a.vx) : 0,
+    vy: a.vy !== undefined ? Number(a.vy) : 0,
+  };
+}
+
+export function normalizeObstacle(raw: unknown): SimObstacle | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const o = raw as Record<string, unknown>;
+  if (o.x === undefined || o.y === undefined) return null;
+  return {
+    type: String(o.type ?? 'UNKNOWN'),
+    x: Number(o.x),
+    y: Number(o.y),
+    width: Number(o.width ?? 0),
+    height: Number(o.height ?? 0),
+    blocksSound: Boolean(o.blocksSound),
+    label: String(o.label ?? ''),
+  };
+}
+
+/** 归一整个快照（缺字段给默认，坏条目丢弃） */
+export function normalizeSnapshot(raw: unknown): SimSnapshot {
+  if (!raw || typeof raw !== 'object') return {};
+  const s = raw as Record<string, unknown>;
+  const agents = Array.isArray(s.agents) ? s.agents.map(normalizeAgent).filter(Boolean) as SimAgent[] : [];
+  const obstacles = Array.isArray(s.obstacles) ? s.obstacles.map(normalizeObstacle).filter(Boolean) as SimObstacle[] : [];
+  return {
+    tick: s.tick !== undefined ? Number(s.tick) : 0,
+    agents,
+    obstacles,
+    timestamp: s.timestamp !== undefined ? Number(s.timestamp) : undefined,
+    worldNarration: typeof s.worldNarration === 'string' ? s.worldNarration : '',
+    directorActive: Boolean(s.directorActive),
+    scene: typeof s.scene === 'string' ? s.scene : undefined,
+    running: typeof s.running === 'boolean' ? s.running : undefined,
+    agentCount: s.agentCount !== undefined ? Number(s.agentCount) : agents.length,
+    recentConversations: Array.isArray(s.recentConversations) ? s.recentConversations : [],
+  };
+}

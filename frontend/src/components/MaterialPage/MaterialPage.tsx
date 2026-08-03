@@ -9,7 +9,10 @@ function shortText(text = '', limit = 110) {
 }
 
 export function MaterialPage() {
-  const { characters, scenes, loadState, goToView } = useAppStore();
+  const { characters, scenes, loadState, goToView,
+    // P-0802-P4：玩家本人角色（绑定 player_id）改名同步用
+    playerId, boundCharacterName, setBoundCharacterName, currentPlayer, setCurrentPlayer,
+  } = useAppStore();
   const [tab, setTab] = useState<Tab>('characters');
 
   // Char form
@@ -39,8 +42,22 @@ export function MaterialPage() {
     if (!name) return;
     setSaving(true);
     try {
-      if (editingChar) await api.updateCharacter(editingChar.name, { name, persona: chPersona.trim(), voice: chVoice.trim(), background: chBg.trim() });
-      else await api.createCharacter({ name, persona: chPersona.trim(), voice: chVoice.trim(), background: chBg.trim() });
+      if (editingChar) {
+        const isBound = editingChar.player_id === playerId || editingChar.name === boundCharacterName;
+        if (isBound && name !== editingChar.name) {
+          // P-0802-P4（改造方案 §4.1）：玩家本人角色（已绑定 player_id）改名 → 改调局中改名端点
+          // （角色库改名 + 四处运行态同步 + 撞名校验② + 失败回滚）
+          await api.playerRename(editingChar.name, name);
+          setBoundCharacterName(name);
+          if (currentPlayer === editingChar.name) setCurrentPlayer(name);
+        } else {
+          // 非绑定角色改名 / 绑定角色编辑资料（不改名）→ 仍走原 PUT（client.ts 按绑定状态决定是否携带 player_id）
+          await api.updateCharacter(editingChar.name, { name, persona: chPersona.trim(), voice: chVoice.trim(), background: chBg.trim() });
+        }
+      } else {
+        // P-0802-P4：新建角色 —— 当前无绑定角色时自动绑定为「玩家本人角色」，之后创建的不携带 player_id（见 client.ts）
+        await api.createCharacter({ name, persona: chPersona.trim(), voice: chVoice.trim(), background: chBg.trim() });
+      }
       resetChar(); await loadState();
     } finally { setSaving(false); }
   };

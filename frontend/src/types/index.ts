@@ -3,6 +3,8 @@
   persona: string;
   voice: string;
   background: string;
+  /** P-0802-P1-demo：玩家身份绑定（改造方案 §3.2）；null/缺省 = 未绑定 */
+  player_id?: string | null;
 }
 
 export interface Scene {
@@ -38,6 +40,8 @@ export interface AppMessage {
   track_label?: string;
   track_mode?: string;
   character?: string;
+  /** P-0802-M：流式增量草稿标记（agent_token 累积中，收到 agent_output 结算后置 false） */
+  streaming?: boolean;
 }
 
 export interface Task {
@@ -61,4 +65,21 @@ export interface WerewolfPlayer {
   role: string;
   alive: boolean;
   roleRevealed: boolean;
+}
+
+// ── 演讲+广播合并地基（announcement SSE 事件）──────────────────
+export interface Announcement {
+  id: string;
+  /** SYSTEM | EVENT | PLAYER | NPC */
+  level: string;
+  /** global | area | system */
+  channel: string;
+  speaker: string;
+  text: string;
+  x?: number;
+  y?: number;
+  radius?: number;
+  /** speech=演讲（带空间范围）| announcement=公告 */
+  mode: string;
+  timestamp: number;
 }

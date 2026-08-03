@@ -12,11 +12,23 @@ import { ttsPlayer } from './services/ttsPlayer';
 /** Skip TTS playback for current utterance when per-character voice is off */
 let _skipTts = false;
 
+/** P-0802-F：后端阶段名 → 前端阶段键（discussion→day_discussion / voting→day_vote） */
+function normalizeWerewolfPhase(p: string): string {
+  if (p === 'discussion') return 'day_discussion';
+  if (p === 'voting') return 'day_vote';
+  return p;
+}
+
 export default function App() {
   const s = useAppStore();
   const isLoggedIn = useAppStore(s => s.isLoggedIn);
   const checkLogin = useAppStore(s => s.checkLogin);
   const view = useAppStore(s => s.view);
+  // P-0802-I：SSE 连接按狼人杀对局会话定向（多客户端/多对局互不串扰）
+  const werewolfSessionId = useAppStore(s => s.werewolfSessionId);
+  // P-0802-J：剧本杀对局会话（script_* 定向事件按此接收）
+  const scriptSessionId = useAppStore(s => s.scriptSessionId);
+  const mode = useAppStore(s => s.mode);
 
   useEffect(() => { checkLogin(); }, []);
   useEffect(() => { if (isLoggedIn) s.loadState(); }, [isLoggedIn]);
@@ -31,6 +43,8 @@ export default function App() {
     switch (eventType) {
       case 'round_start': {
         store.setCurrentRound(data.round);
+        // P-0802-M：新轮开始前结算上轮遗留的流式草稿（防中断残留半截消息）
+        store.settleAllStreaming();
         const rs = useAppStore.getState();
         const smallMode = rs.mode === 'free' || rs.mode === 'director';
         if (!(smallMode && rs.agents.length < 3)) {
@@ -53,6 +67,13 @@ export default function App() {
         store.setCharStatus(data.agent_name, 'active');
         break;
       }
+      // P-0802-M：LLM 流式增量 —— 逐片累积到同名草稿消息（完整内容由 agent_output 结算）
+      case 'agent_token': {
+        if (data.agent_name && data.delta) {
+          store.appendAgentToken(data.agent_name, data.delta, data.track_id, data.track_label, data.track_mode);
+        }
+        break;
+      }
       case 'agent_silent': {
         store.addSystemMsg(`${data.agent_name} 本轮旁听`);
         store.setCharStatus(data.agent_name, 'silent');
@@ -71,6 +92,8 @@ export default function App() {
       case 'round_complete': {
         store.setCurrentRound(data.round);
         store.setRunning(false);
+        // P-0802-M：轮次完成即结算全部流式草稿（agent_output 已到；兜底清理）
+        store.settleAllStreaming();
         const rc = useAppStore.getState();
         const smallMode2 = rc.mode === 'free' || rc.mode === 'director';
         if (!(smallMode2 && rc.agents.length < 3)) {
@@ -108,14 +131,11 @@ export default function App() {
       }
       case 'werewolf_phase': {
         console.log('[SSE] werewolf_phase:', data);
-        // Normalize phase name for frontend compatibility
-        const _normalizePhase = (p: string) => {
-          if (p === 'discussion') return 'day_discussion';
-          if (p === 'voting') return 'day_vote';
-          return p;
-        };
-        const phase = _normalizePhase(data.phase) as WerewolfPhase;
+        const phase = normalizeWerewolfPhase(data.phase) as WerewolfPhase;
         store.setWerewolfPhase(phase, data.round);
+        if (data.session_id) store.setWerewolfSessionId(data.session_id);
+        // P-0802-I (G1-2)：新夜清空女巫获知信息（等下一次获知事件）
+        if (phase === 'night') store.setWerewolfWitchVictim('');
         const phaseLabels: Record<string, string> = {
           night: '夜间',
           day_discussion: '白天讨论',
@@ -151,13 +171,18 @@ export default function App() {
         break;
       }
       case 'werewolf_player_eliminated': {
-        if (data.name && data.role) {
+        if (data.name) {
           const roleMap: Record<string, string> = {
             wolf: '狼人', seer: '预言家', witch: '女巫', hunter: '猎人',
             villager: '平民', guard: '守卫', idiot: '白痴', elder: '长老', knight: '骑士',
           };
-          store.setWerewolfPlayerEliminated(data.name, roleMap[data.role] || data.role);
-          store.addSystemMsg(`${data.name} 出局 (${roleMap[data.role] || data.role})`);
+          // P-0802-F：全局广播不含死者身份（角色保密），role 为空时仅提示出局
+          if (data.role) {
+            store.setWerewolfPlayerEliminated(data.name, roleMap[data.role] || data.role);
+            store.addSystemMsg(`${data.name} 出局 (${roleMap[data.role] || data.role})`);
+          } else {
+            store.addSystemMsg(`${data.name} 出局`);
+          }
         }
         break;
       }
@@ -177,6 +202,68 @@ export default function App() {
       case 'werewolf_witch_info': {
         store.addSystemMsg(data.hint);
         store.setWerewolfWaitHuman(true);
+        // P-0802-I (G1-2)：女巫获知被刀者 → 前端面板先展示被刀者，再让女巫决定救/不救/毒
+        if (data.victim) store.setWerewolfWitchVictim(String(data.victim));
+        break;
+      }
+      // P-0802-F：夜间结算 / 投票进度 / 讨论发言 / 状态推送
+      case 'werewolf_night_result': {
+        store.setWerewolfWaitHuman(false);
+        if (data.session_id) store.setWerewolfSessionId(data.session_id);
+        const died = Array.isArray(data.died) ? data.died : [];
+        store.addSystemMsg(died.length > 0
+          ? `🌙 昨夜死亡：${died.join('、')}`
+          : '🌙 昨夜平安夜，无人死亡');
+        break;
+      }
+      case 'werewolf_vote_update': {
+        store.setWerewolfWaitHuman(false);
+        if (data.session_id) store.setWerewolfSessionId(data.session_id);
+        if (typeof data.votes_count === 'number') store.setWerewolfVoteCount(data.votes_count);
+        if (data.approval) store.setWerewolfApproval(data.approval);
+        if (data.exiled) store.addSystemMsg(`🗳️ ${data.exiled} 被放逐（${data.reason || ''}）`);
+        if (data.winner) store.setWerewolfWinner(data.winner);
+        if (data.phase) {
+          const p2 = normalizeWerewolfPhase(data.phase) as WerewolfPhase;
+          store.setWerewolfPhase(p2, data.round || store.werewolfRound);
+        }
+        break;
+      }
+      case 'werewolf_speech': {
+        if (data.speaker && data.message) {
+          store.addAgentMsg(data.speaker, data.message, 'day_discussion', '', 'merged');
+          store.addWerewolfDiscussionTurn({ speaker: data.speaker, message: data.message });
+        }
+        break;
+      }
+      case 'werewolf_status': {
+        if (data.session_id) store.setWerewolfSessionId(data.session_id);
+        if (Array.isArray(data.players)) store.setWerewolfPlayers(data.players);
+        break;
+      }
+      // 剧本杀 SSE（GAP-8）：阶段流转 / 状态推送 / 揭晓结果
+      case 'script_phase': {
+        console.log('[SSE] script_phase:', data);
+        store.setScriptPhase(data.phase);
+        const labels: Record<string, string> = {
+          setup: '准备阶段', investigation: '搜证阶段', discussion: '讨论阶段',
+          vote: '投票阶段', reveal: '揭晓阶段', ended: '对局已结束',
+        };
+        const lbl = labels[data.phase] || data.phase || '';
+        store.addSystemMsg(`🎭 剧本杀：${lbl}${data.phase === 'ended' ? '（终局）' : ''}`);
+        break;
+      }
+      case 'script_status': {
+        console.log('[SSE] script_status:', data);
+        store.setScriptState(data);
+        if (data.phase) store.setScriptPhase(data.phase);
+        break;
+      }
+      case 'script_reveal': {
+        console.log('[SSE] script_reveal:', data);
+        store.setScriptReveal(data);
+        const verdict = data.correct ? '✅ 成功找到真凶' : '❌ 冤枉了好人';
+        store.addSystemMsg(`🎬 揭晓：得票最多 ${data.most_voted || '无'}，真凶 ${data.murderer || '未识别'}（${verdict}）`);
         break;
       }
       case 'auto_complete': {
@@ -223,6 +310,11 @@ export default function App() {
         store.addSystemMsg(`[阶段] → ${data.phase}`);
         break;
       }
+      case 'announcement': {
+        // 演讲+广播合并地基：SSE announcement → 公告栏 + 中央横幅（打字机）
+        store.addAnnouncement(data);
+        break;
+      }
       // TTS 流式语音
       case 'tts_start': {
         const agentName = data.agent_name || '';
@@ -253,7 +345,10 @@ export default function App() {
       }
     }
   });
-  useSSE(sseHandlerRef.current);
+  // P-0802-J：按当前模式选会话定向 —— 剧本杀用 script 会话、狼人杀用 werewolf 会话、
+  // 其他模式不携带会话（全局广播全覆盖；无匹配会话时定向事件静默丢弃，前端轮询兜底）
+  const sseSessionId = mode === 'script' ? scriptSessionId : (mode === 'werewolf' ? werewolfSessionId : '');
+  useSSE(sseHandlerRef.current, sseSessionId);
 
   return (
     <>

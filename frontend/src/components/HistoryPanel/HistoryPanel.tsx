@@ -3,12 +3,14 @@ import { api } from '../../api/client';
 import { useAppStore } from '../../store/appStore';
 
 interface SessionInfo {
-  session_id: string;
-  created_at: string;
-  updated_at: string;
-  round_count: number;
-  message_count: number;
-  agent_names: string[];
+  session_id?: string;
+  id?: string;
+  created_at?: string;
+  updated_at?: string;
+  round_count?: number;
+  rounds?: number;
+  message_count?: number;
+  agent_names?: string[];
 }
 
 interface SessionMessages {
@@ -62,7 +64,7 @@ export function HistoryPanel({ onClose }: { onClose: () => void }) {
     setLoadError('');
     try {
       const data = await api.loadHistorySession(sessionId);
-      store.addSystemMsg(`已加载历史会话：${sessionId}（第${data.round}轮，${data.agents?.length || 0}个角色）`);
+      store.addSystemMsg(`已加载历史会话：${sessionId}（第${data.round ?? 0}轮，${data.agents?.length ?? 0}个角色）`);
       // Refresh state
       await store.loadState();
       await store.loadHistory();
@@ -114,26 +116,30 @@ export function HistoryPanel({ onClose }: { onClose: () => void }) {
         ) : sessions.length === 0 ? (
           <div className="history-empty">暂无历史会话</div>
         ) : (
-          sessions.map((s) => (
-            <div
-              key={s.session_id}
-              className={`history-session-item ${selectedSession === s.session_id ? 'selected' : ''} ${currentSessionId === s.session_id ? 'current' : ''}`}
-              onClick={() => viewSession(s.session_id)}
-            >
-              <div className="history-session-id" title={s.session_id}>
-                {s.session_id.replace('roleplay_', '').replace('script_', '').replace('werewolf_', '')}
+          sessions.map((s, i) => {
+            // Backend returns the id as `id` (not `session_id`) — normalize for compatibility
+            const sid: string = s.session_id || s.id || String(i);
+            return (
+              <div
+                key={sid}
+                className={`history-session-item ${selectedSession === sid ? 'selected' : ''} ${currentSessionId === sid ? 'current' : ''}`}
+                onClick={() => viewSession(sid)}
+              >
+                <div className="history-session-id" title={sid}>
+                  {sid.replace('roleplay_', '').replace('script_', '').replace('werewolf_', '')}
+                </div>
+                <div className="history-session-meta">
+                  <span>{s.round_count ?? s.rounds ?? 0}轮</span>
+                  <span>{s.message_count || 0}条</span>
+                  <span>{s.agent_names?.length || 0}人</span>
+                </div>
+                <div className="history-session-date">{formatDate(s.updated_at || s.created_at || '')}</div>
+                {currentSessionId === sid && (
+                  <div className="history-session-current-badge">当前</div>
+                )}
               </div>
-              <div className="history-session-meta">
-                <span>{s.round_count}轮</span>
-                <span>{s.message_count}条</span>
-                <span>{s.agent_names?.length || 0}人</span>
-              </div>
-              <div className="history-session-date">{formatDate(s.updated_at || s.created_at)}</div>
-              {currentSessionId === s.session_id && (
-                <div className="history-session-current-badge">当前</div>
-              )}
-            </div>
-          ))
+            );
+          })
         )}
       </div>
 

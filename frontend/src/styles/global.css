@@ -391,6 +391,13 @@ textarea { min-height: 76px; padding: 9px 10px; resize: vertical; }
   overflow: hidden;
 }
 
+/* Workspace layout — script (剧本杀) mode also renders 3 columns (panel-left + script panel + chat-main).
+   P-0802-L：此前 script 模式无专属类，默认 2 列 grid 把 chat-main 自动放到第 2 行第 1 列（140px 窄条），
+   内嵌 2D 面板被挤压几乎不可见；与 werewolf-mode 同款三列处理。 */
+.workspace.script-mode {
+  grid-template-columns: 140px 260px minmax(420px, 1fr);
+}
+
 /* Werewolf game state panel */
 .ww-panel {
   display: flex;
@@ -398,6 +405,74 @@ textarea { min-height: 76px; padding: 9px 10px; resize: vertical; }
   gap: 8px;
   height: 100%;
   overflow-y: auto;
+}
+/* P-0802-F：狼人杀行动面板（夜间/讨论/投票/开枪/审批） */
+.ww-action-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid rgba(181,140,255,.25);
+  border-radius: var(--radius);
+  background: rgba(181,140,255,.06);
+  flex-shrink: 0;
+}
+.ww-action-box.muted {
+  border-color: rgba(255,255,255,.06);
+  background: rgba(255,255,255,.02);
+  color: var(--text-3);
+  font-size: 12px;
+}
+.ww-action-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--purple);
+}
+.ww-action-targets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.ww-target-chip {
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.04);
+  color: var(--text);
+  border-radius: 12px;
+  padding: 2px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all .15s;
+}
+.ww-target-chip:hover {
+  border-color: var(--purple);
+}
+.ww-target-chip.on {
+  background: var(--purple);
+  border-color: var(--purple);
+  color: #fff;
+}
+.ww-action-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.ww-discussion {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 150px;
+  overflow-y: auto;
+  font-size: 12px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  background: rgba(0,0,0,.18);
+}
+.ww-disc-turn {
+  line-height: 1.5;
+}
+.ww-disc-turn b {
+  color: var(--purple);
 }
 .ww-panel-header {
   display: flex;
@@ -601,9 +676,11 @@ textarea { min-height: 76px; padding: 9px 10px; resize: vertical; }
 /* Responsive: hide werewolf panel on narrow screens */
 @media (max-width: 1080px) {
   .workspace.werewolf-mode { grid-template-columns: 140px 260px minmax(360px, 1fr); }
+  .workspace.script-mode { grid-template-columns: 140px 260px minmax(360px, 1fr); }
 }
 @media (max-width: 900px) {
   .workspace.werewolf-mode { grid-template-columns: 140px minmax(360px, 1fr); }
+  .workspace.script-mode { grid-template-columns: 140px minmax(360px, 1fr); }
   .panel-werewolf { display: none; }
 }
 
@@ -958,3 +1035,187 @@ textarea { min-height: 76px; padding: 9px 10px; resize: vertical; }
   50% { opacity: .6; transform: scale(1.15); }
 }
 
+/* ==== 演讲+广播合并地基：横幅 / 公告栏（2026-08-01 coder 新增）==== */
+
+/* 中央顶部横幅（打字机） */
+.ann-banner {
+  position: fixed;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  max-width: min(720px, 92vw);
+  padding: 12px 22px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(20,20,35,0.94), rgba(30,30,50,0.94));
+  border: 1px solid rgba(255,255,255,0.16);
+  box-shadow: 0 8px 30px rgba(0,0,0,0.45);
+  color: #f1f5f9;
+  font-size: 15px;
+  line-height: 1.5;
+  animation: ann-fade-in 0.35s ease-out;
+}
+.ann-banner-mode {
+  font-weight: 700;
+  margin-right: 8px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(255,255,255,0.12);
+  font-size: 12px;
+}
+.ann-banner-speaker { font-weight: 700; color: #fbbf24; margin-right: 4px; }
+.ann-banner-text { white-space: pre-wrap; }
+.ann-banner.ann-system { border-color: rgba(251,191,36,0.6); }
+.ann-banner.ann-event  { border-color: rgba(96,165,250,0.6); }
+.ann-banner.ann-player { border-color: rgba(74,222,128,0.6); }
+.ann-banner.ann-npc    { border-color: rgba(148,163,184,0.6); }
+/* P1-8：内嵌 2D 游戏视图（PhaserSimulationView）内挂载时的定位——跟随面板、不常驻视口 */
+.ann-banner.inline {
+  position: absolute;
+  top: 52px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+}
+@keyframes ann-fade-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(-8px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* 侧边公告栏（滚动列表） */
+.ann-ticker {
+  position: fixed;
+  right: 14px;
+  top: 14px;
+  z-index: 9998;
+  width: 300px;
+  max-height: 46vh;
+  display: flex;
+  flex-direction: column;
+  background: rgba(15,15,28,0.82);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 10px;
+  overflow: hidden;
+  backdrop-filter: blur(6px);
+  font-size: 12.5px;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.35);
+}
+.ann-ticker-title {
+  padding: 8px 12px;
+  font-weight: 700;
+  color: #fbbf24;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+  background: rgba(251,191,36,0.08);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.ann-ticker-close {
+  flex-shrink: 0;
+  background: transparent;
+  border: 0;
+  color: #94a3b8;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.ann-ticker-close:hover { color: #f1f5f9; background: rgba(255,255,255,0.12); }
+/* P1-8：内嵌 2D 游戏视图内挂载时的定位——跟随面板、不常驻视口右上角 */
+.ann-ticker.inline {
+  position: absolute;
+  right: 8px;
+  top: 52px;
+  z-index: 30;
+  max-height: 40vh;
+}
+.ann-ticker-empty { padding: 14px 12px; color: #64748b; text-align: center; }
+.ann-item {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  padding: 6px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  line-height: 1.4;
+}
+.ann-item:last-child { border-bottom: 0; }
+.ann-tag {
+  flex-shrink: 0;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.14);
+  color: #cbd5e1;
+}
+.ann-scope { flex-shrink: 0; font-size: 10px; color: #94a3b8; }
+.ann-speaker { flex-shrink: 0; font-weight: 700; color: #fbbf24; }
+.ann-text { color: #e2e8f0; overflow-wrap: anywhere; }
+.ann-item-ann-system .ann-tag { background: rgba(251,191,36,0.25); color: #fbbf24; }
+.ann-item-ann-event  .ann-tag { background: rgba(96,165,250,0.25); color: #93c5fd; }
+.ann-item-ann-player .ann-tag { background: rgba(74,222,128,0.25); color: #4ade80; }
+.ann-item-ann-npc    .ann-tag { background: rgba(148,163,184,0.25); color: #94a3b8; }
+
+/* ════ C-1 批次（2026-08-02）：2D 视图右侧聊天面板（左地图 + 右聊天，可折叠）════ */
+.sim-chat-panel {
+  width: 320px;
+  max-width: 38vw;
+  border-left: 1px solid #334155;
+  background: #1e293b;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex-shrink: 0;
+}
+.sim-chat-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: #cbd5e1;
+  line-height: 1.5;
+}
+.sim-chat-msg { margin-bottom: 6px; overflow-wrap: anywhere; }
+.sim-chat-msg .who { font-weight: 600; }
+.sim-chat-msg.kind-player .who { color: #38bdf8; }
+.sim-chat-msg.kind-system .who { color: #fbbf24; }
+.sim-chat-msg.kind-system { color: #94a3b8; }
+/* C-2 衔接：播放状态样式区分（pending=待播放半透明 / playing=高亮闪烁 / done=正常） */
+.sim-chat-msg.status-pending { opacity: 0.5; }
+.sim-chat-msg.status-playing { color: #7dd3fc; }
+.sim-chat-msg .status-tag {
+  font-size: 10px;
+  margin-left: 6px;
+  color: #64748b;
+  white-space: nowrap;
+}
+.sim-chat-msg.status-playing .status-tag { color: #38bdf8; animation: sim-blink 1s infinite; }
+/* C-2：打字机光标（播放中逐字揭示的闪烁竖线） */
+.sim-chat-msg .typewriter-caret { color: #7dd3fc; animation: sim-blink 0.6s infinite; }
+@keyframes sim-blink { 50% { opacity: 0.35; } }
+
+/* ── P-0803-E：小地图（调研项 2 方案 B，DOM canvas 覆盖层） ── */
+.mini-map-canvas {
+  display: block;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  background: #0f172a;
+}
+/* ── P-0803-E：全屏（调研项 3，Fullscreen API；Phaser Scale.FIT 随容器自适应） ── */
+.script-map-view:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  border-radius: 0;
+  display: flex;
+  flex-direction: column;
+}
+.script-map-view:fullscreen .script-map-host {
+  flex: 1;
+  min-height: 0;
+}
+.script-map-view:fullscreen .script-map-result {
+  max-height: 30vh;
+  overflow-y: auto;
+}
