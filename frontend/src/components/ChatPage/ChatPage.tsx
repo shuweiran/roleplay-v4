@@ -5,6 +5,7 @@ import { api } from '../../api/client';
 import type { AppMessage, WerewolfPhase } from '../../types';
 import { ScriptDmPanel } from '../ScriptDmPanel';
 import { PhaserSimulationView } from '../../phaser/PhaserSimulationView';
+import { PhaserScriptMapView } from '../../phaser/PhaserScriptMapView';
 
 // Voice recognition — uses local Whisper model via backend
 let mediaRecorder: MediaRecorder | null = null;
@@ -1452,12 +1453,22 @@ export function ChatPage() {
                 </span>
                 <button className="btn btn-smallall btn-danger" onClick={toggleSimPanel}>✕ 关闭</button>
               </div>
-              <PhaserSimulationView
-                characters={simChars}
-                scene="park"
-                playerName={store.currentPlayer}
-                height={420}
-              />
+              {/* P-0803-H2：剧本杀对局中 2D 模拟显示对局地图（PhaserScriptMapView），而非通用 park 场景 */}
+              {store.mode === 'script' && scriptState?.map ? (
+                <PhaserScriptMapView
+                  map={scriptState.map}
+                  playerName={store.currentPlayer}
+                  height={420}
+                  searchedLocations={Array.isArray(scriptState.searched_locations) ? scriptState.searched_locations : []}
+                />
+              ) : (
+                <PhaserSimulationView
+                  characters={simChars}
+                  scene="park"
+                  playerName={store.currentPlayer}
+                  height={420}
+                />
+              )}
             </div>
           )}
           {/* Loading progress bar */}

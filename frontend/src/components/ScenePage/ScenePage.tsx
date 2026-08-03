@@ -37,6 +37,9 @@ export function ScenePage() {
   const [formDesc, setFormDesc] = useState('');
   const [formKeyword, setFormKeyword] = useState('');
   const [scriptPrompt, setScriptPrompt] = useState('');
+  // P-0803-H2：恢复对局入口（对局不在场景列表，刷新后需手动重连；session_id + player_key）
+  const [resumeSid, setResumeSid] = useState('');
+  const [resumeKey, setResumeKey] = useState('');
   const [simChars, setSimChars] = useState<Array<{ name: string; persona: string; voice: string; background: string }>>([]);
   const [simScene, setSimScene] = useState('park');
   const [scriptGame, setScriptGame] = useState<any>(null);
@@ -61,14 +64,32 @@ export function ScenePage() {
   const [charSort, setCharSort] = useState<'default' | 'az' | 'za'>('default');
   const [charFilter, setCharFilter] = useState<'all' | 'selected' | 'unselected'>('all');
   const [sceneSort, setSceneSort] = useState<'default' | 'az' | 'za'>('default');
-  const [sceneFilter, setSceneFilter] = useState<'all' | 'script' | 'normal'>('all');
+  // ── P-0803-H：剧本选择与角色卡功能改造 ──
+  /** 剧本选择分类页签（一般模式 / 狼人杀模式） */
+  const [scriptCategory, setScriptCategory] = useState<'general' | 'werewolf'>('general');
+  /** 点开的剧本卡（点开后显示角色卡栏 + 地图预览） */
+  const [openScript, setOpenScript] = useState<Scene | null>(null);
+  /** 角色卡分组页签（'all'=全部 / 'free'=自由角色卡 / scene_id=所属剧本） */
+  const [charTab, setCharTab] = useState<string>('all');
+  /** 一般模式「是否 2D」选择（需求 8：一般模式给用户选择） */
+  const [enable2D, setEnable2D] = useState(false);
+  /** 狼人杀模式「默认 2D」（需求 8：默认开启） */
+  const [wwEnable2D, setWwEnable2D] = useState(true);
+  // 剧本编辑弹窗新字段（P-0803-H）
+  const [formCategory, setFormCategory] = useState<'general' | 'werewolf'>('general');
+  const [formDefaultRoles, setFormDefaultRoles] = useState<Set<string>>(new Set());
+  const [formDefaultMap, setFormDefaultMap] = useState<any>(null);
+  const [mapGenBusy, setMapGenBusy] = useState(false);
   // ── Phaser 阶段 1：在内嵌 Phaser 视图中打开 2D 模拟（不进聊天页、不弹新窗口） ──
   // 数据流与 simulation.html 完全一致（/api/simulation/* REST+SSE），Java 后端零改动；
   // C-1：原「进入 2D 模拟」checkbox 已合并——本按钮为唯一 2D 入口（内嵌左地图+右聊天视图）。
   const openPhaserSim = () => {
-    if (selectedNames.length < 2) { setStatus('请至少选择 2 个角色'); return; }
-    if (!activeScene) { setStatus('请先选择一个场景'); return; }
-    const scenePlayers = Array.from(new Set([...selectedNames, ...roomPlayers]));
+    // P-0803-H：优先用点开剧本卡的默认角色组（未点开剧本时回退当前勾选集合，需求 3/5）
+    const basePlayers = (openScript?.default_roles || []).filter(Boolean) as string[];
+    const pool = basePlayers.length > 0 ? basePlayers : selectedNames;
+    if (pool.length < 2) { setStatus('请至少选择 2 个角色'); return; }
+    if (!activeScene) { setStatus('请先选择一个剧本'); return; }
+    const scenePlayers = Array.from(new Set([...pool, ...roomPlayers]));
     const charDetails = scenePlayers.map(name => {
       const ch = characters.find(c => c.name === name);
       return ch
@@ -91,25 +112,63 @@ export function ScenePage() {
   const roomPlayers = Array.from(new Set(onlinePlayers.filter(Boolean)));
   const isRulesMode = mode === 'rules';
 
-  // ── C-1（P3-11）：角色列表分类+排序（已选/未选分类，名称 A-Z/Z-A 排序；Me 卡与全选/清空不受影响） ──
-  const sortedChars = useMemo(() => {
-    let list = [...characters];
+  // P-0803-H：角色列表筛选/排序已并入 displayChars（tabChars 之上套用 charFilter/charSort）
+
+  // ── P-0803-H：剧本卡列表 —— 按分类（一般模式/狼人杀模式）过滤 + 名称排序（需求 2/4） ──
+
+  // ── P-0803-H：剧本选择与角色卡分组（纯前端派生，需求 4/6/7） ──
+  /** 用户自己的角色卡（绑定 player_id 的角色；无绑定时取 currentPlayer 同名字符；两者皆无则无置顶） */
+  const myCharName = useMemo(() => {
+    const bound = characters.find((c: any) => c.player_id === playerId);
+    if (bound) return String(bound.name || '');
+    if (characters.some((c: any) => c.name === currentPlayer)) return currentPlayer;
+    return '';
+  }, [characters, playerId, currentPlayer]);
+  /** 有默认角色组的剧本 → 角色卡按场景分类的页签（需求 6） */
+  const scriptGroups = useMemo(
+    () => scenes.filter((s: any) => Array.isArray(s.default_roles) && s.default_roles.length > 0),
+    [scenes]
+  );
+  /** 自由角色卡 = 不在任何剧本 default_roles 中的角色（需求 6 自由页） */
+  const freeChars = useMemo(
+    () => characters.filter((c: any) => !scriptGroups.some((s: any) => (s.default_roles || []).includes(c.name))),
+    [characters, scriptGroups]
+  );
+  /** 每栏列表排序：用户自己的角色卡置顶，其余按名称排序（需求 7） */
+  const withMeFirst = (list: Character[]) => {
+    const rest = [...list].sort((a, b) => String(a.name).localeCompare(String(b.name), 'zh'));
+    const me = rest.filter(c => c.name === myCharName);
+    return [...me, ...rest.filter(c => c.name !== myCharName)];
+  };
+  /** 当前角色页签显示的角色列表（全部 / 所属剧本组 / 自由角色卡） */
+  const tabChars = useMemo(() => {
+    if (charTab === 'all') return withMeFirst([...characters]);
+    if (charTab === 'free') return withMeFirst([...freeChars]);
+    const sc = scenes.find((s: any) => s.scene_id === charTab);
+    if (sc) {
+      const names = new Set((sc.default_roles || []).filter(Boolean));
+      return withMeFirst(characters.filter((c: any) => names.has(c.name)));
+    }
+    return [];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [charTab, characters, scenes, freeChars, myCharName]);
+  /** 剧本选择：按分类过滤（一般模式 / 狼人杀模式，需求 4）+ 名称排序 */
+  const scriptCards = useMemo(() => {
+    let list = scenes.filter((s: any) => (s.category || 'general') === scriptCategory);
+    if (sceneSort === 'az') list = [...list].sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'zh'));
+    else if (sceneSort === 'za') list = [...list].sort((a, b) => String(b.name || '').localeCompare(String(a.name || ''), 'zh'));
+    return list;
+  }, [scenes, scriptCategory, sceneSort]);
+  /** 当前页签角色列表套用既有筛选/排序（已选/未选 + 名称排序） */
+  const displayChars = useMemo(() => {
+    let list = tabChars;
     if (charFilter === 'selected') list = list.filter(c => selected.has(c.name));
     else if (charFilter === 'unselected') list = list.filter(c => !selected.has(c.name));
-    if (charSort === 'az') list.sort((a, b) => String(a.name).localeCompare(String(b.name), 'zh'));
-    else if (charSort === 'za') list.sort((a, b) => String(b.name).localeCompare(String(a.name), 'zh'));
+    if (charSort === 'az') list = [...list].sort((a, b) => String(a.name).localeCompare(String(b.name), 'zh'));
+    else if (charSort === 'za') list = [...list].sort((a, b) => String(b.name).localeCompare(String(a.name), 'zh'));
     return list;
-  }, [characters, charSort, charFilter, selected]);
-
-  // ── C-1（P3-11）：场景列表分类+排序（剧本杀对局场景（scene_id 前缀 script_）/普通场景分类，名称排序） ──
-  const sortedScenes = useMemo(() => {
-    let list = [...scenes];
-    if (sceneFilter === 'script') list = list.filter(s => String(s.scene_id || '').startsWith('script_'));
-    else if (sceneFilter === 'normal') list = list.filter(s => !String(s.scene_id || '').startsWith('script_'));
-    if (sceneSort === 'az') list.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'zh'));
-    else if (sceneSort === 'za') list.sort((a, b) => String(b.name || '').localeCompare(String(a.name || ''), 'zh'));
-    return list;
-  }, [scenes, sceneSort, sceneFilter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabChars, charFilter, charSort, selected]);
 
   // Auto-select default werewolf characters when entering rules+ww mode
   useEffect(() => {
@@ -119,11 +178,12 @@ export function ScenePage() {
     setSelected(prev => {
       const n = new Set(prev);
       WEREWOLF_DEFAULTS.forEach(d => {
-        if (available.has(d)) n.add(d);
+        // P-0803-H（需求 7）：用户自己的角色卡不默认勾选
+        if (d !== myCharName && available.has(d)) n.add(d);
       });
       return n;
     });
-  }, [isRulesMode, rulesTab, characters.length]);
+  }, [isRulesMode, rulesTab, characters.length, myCharName]);
 
   const toggleCharacter = (name: string) => {
     setSelected(prev => {
@@ -133,12 +193,33 @@ export function ScenePage() {
     });
   };
 
-  const selectScene = (scene: Scene) => { setActiveScene(scene); };
+  /** P-0803-H：点开剧本卡 → 自动带上默认角色组（排除用户自己的角色卡，需求 3+7）+ 切到该剧本的角色页签 */
+  const selectScript = (scene: Scene) => {
+    setActiveScene(scene);
+    setOpenScript(scene);
+    setSelected(prev => {
+      const n = new Set(prev);
+      (scene.default_roles || []).filter(Boolean).forEach((nm: string) => {
+        if (nm !== myCharName) n.add(nm);
+      });
+      return n;
+    });
+    setCharTab(scene.scene_id);
+    setStatus(`已选择剧本《${scene.name}》｜默认角色 ${(scene.default_roles || []).length} 个已自动带上（你的角色卡不自动勾选，可手动勾选）`);
+  };
 
   const openNewChar = () => { setModalType('char'); setEditTarget(null); setFormName(''); setFormVoice(''); setFormPersona(''); setFormBg(''); };
   const openEditChar = (ch: Character) => { setModalType('char'); setEditTarget(ch); setFormName(ch.name); setFormVoice(ch.voice); setFormPersona(ch.persona); setFormBg(ch.background); };
-  const openNewScene = () => { setModalType('scene'); setEditTarget(null); setFormName(''); setFormDesc(''); };
-  const openEditScene = (sc: Scene) => { setModalType('scene'); setEditTarget(sc); setFormName(sc.name); setFormDesc(sc.description); };
+  const openNewScene = () => {
+    setModalType('scene'); setEditTarget(null); setFormName(''); setFormDesc('');
+    setFormCategory(scriptCategory); setFormDefaultRoles(new Set()); setFormDefaultMap(null);
+  };
+  const openEditScene = (sc: Scene) => {
+    setModalType('scene'); setEditTarget(sc); setFormName(sc.name); setFormDesc(sc.description);
+    setFormCategory((sc.category || 'general') as any);
+    setFormDefaultRoles(new Set((sc.default_roles || []).filter(Boolean)));
+    setFormDefaultMap(sc.default_map || null);
+  };
   const closeModal = () => setModalType(null);
 
   const saveChar = async () => {
@@ -172,19 +253,65 @@ export function ScenePage() {
     if (!formName || !formDesc) return;
     setLoading(true);
     try {
+      // P-0803-H：剧本绑定三字段（category 分类 / default_roles 默认角色组 / default_map 默认地图）
+      const data = {
+        name: formName,
+        description: formDesc,
+        category: formCategory,
+        default_roles: Array.from(formDefaultRoles),
+        // 清除地图用空串（后端语义：null=保留旧值 / 空串=清除 / JSON=写入）
+        default_map: formDefaultMap === null || formDefaultMap === undefined ? null : (typeof formDefaultMap === 'string' && formDefaultMap === '' ? '' : formDefaultMap),
+      };
       if (editTarget) {
-        await api.updateScene(editTarget.scene_id, { name: formName, description: formDesc });
+        await api.updateScene(editTarget.scene_id, data);
       } else {
-        await api.createScene({ name: formName, description: formDesc, initial_agent_names: [] });
+        await api.createScene({ initial_agent_names: [], ...data });
       }
       closeModal();
       await loadState();
+      // P-0803-H：保存后同步点开的剧本卡（默认角色/地图/分类变更立即反映到详情面板）
+      if (editTarget && openScript?.scene_id === editTarget.scene_id) {
+        const updated = useAppStore.getState().scenes.find((s: any) => s.scene_id === editTarget.scene_id);
+        if (updated) setOpenScript(updated);
+      }
     } catch (e: any) { setStatus(e.message); }
     setLoading(false);
   };
 
   const deleteScene = async (sc: Scene) => {
-    try { await api.deleteScene(sc.scene_id); await loadState(); } catch (e: any) { setStatus(e.message); }
+    try {
+      await api.deleteScene(sc.scene_id);
+      // P-0803-H：删除的是点开的剧本卡/当前角色页签 → 关闭详情、回退全部页签
+      if (openScript?.scene_id === sc.scene_id) setOpenScript(null);
+      if (charTab === sc.scene_id) setCharTab('all');
+      await loadState();
+    } catch (e: any) { setStatus(e.message); }
+  };
+
+  // P-0803-H：角色卡删除（需求 1）—— 前端删除按钮 + 确认（DELETE /api/characters/{name} 后端已就绪）
+  const deleteChar = async (ch: Character) => {
+    if (!window.confirm(`删除角色「${ch.name}」？删除后不可恢复。`)) return;
+    try {
+      await api.deleteCharacter(ch.name);
+      setSelected(prev => { const n = new Set(prev); n.delete(ch.name); return n; });
+      await loadState();
+      setStatus(`已删除角色「${ch.name}」`);
+    } catch (e: any) { setStatus(e.message); }
+  };
+
+  /** P-0803-H：剧本编辑弹窗「生成默认地图」（BSP 确定性生成，契约 v1） */
+  const genDefaultMap = async () => {
+    setMapGenBusy(true);
+    try {
+      const r = await api.sceneMap();
+      if (r?.map) {
+        setFormDefaultMap(r.map);
+        setStatus('默认地图已生成（BSP，契约 v1）——保存剧本后生效');
+      } else {
+        setStatus('默认地图生成失败：响应缺少 map 字段');
+      }
+    } catch (e: any) { setStatus('默认地图生成失败：' + (e.message || '网络错误')); }
+    setMapGenBusy(false);
   };
 
   const generateChar = async () => {
@@ -246,6 +373,11 @@ export function ScenePage() {
     setStatus('正在进入狼人杀...');
     try {
       await enterScene('werewolf_default', names, currentPlayer);
+      // P-0803-H（需求 3/4）：狼人杀对局场景标记为狼人杀分类 + 绑定默认角色组 → 在「剧本选择 · 狼人杀模式」页签可见复用
+      try {
+        await api.updateScene('werewolf_default', { category: 'werewolf', default_roles: names });
+        await store.loadState();
+      } catch { /* 忽略：场景未落库等非关键路径 */ }
       await setMode('werewolf', '', currentPlayer);
       // P-0802-C：职业配置计数 → player→role map（按选中顺序展开；剩余玩家由后端补齐村民）。
       // P-0802-F：后端已支持宽容解析（大小写不敏感 + 中英文别名 wolf/狼人→WEREWOLF 等），
@@ -273,6 +405,20 @@ export function ScenePage() {
       const aliveCount = Array.isArray(roleData.alive) ? roleData.alive.length : 0;
       setStatus('你的身份：' + (roleMapCn[roleData.your_role] || roleData.your_role || '未知') +
         ' | 存活 ' + aliveCount + '/' + names.length + ' | 阶段：' + (phaseMap[roleData.phase] || roleData.phase));
+      // P-0803-H（需求 8）：狼人杀模式默认 2D —— 开局后自动打开内嵌 2D 视图（玩家角色进 2D 世界）
+      if (wwEnable2D) {
+        const charDetails = names.map(name => {
+          const ch = characters.find(c => c.name === name);
+          return ch
+            ? { name: ch.name, persona: ch.persona || '', voice: ch.voice || '', background: ch.background || '' }
+            : { name, persona: `${name}，一个角色`, voice: '', background: '' };
+        });
+        setSimChars(charDetails);
+        setSimScene('park');
+        setShowPhaserSim(true);
+        setStatus('已进入狼人杀（默认 2D）｜你的身份：' + (roleMapCn[roleData.your_role] || roleData.your_role || '未知') +
+          ' ｜右侧「进入聊天页」可打开游戏面板');
+      }
     } catch (e: any) { setStatus(e.message || '进入失败'); }
   };
 
@@ -341,6 +487,33 @@ export function ScenePage() {
       setStatus(e.message || '剧本生成失败');
     }
     setGenerating(false);
+  };
+
+  // 剧本杀：恢复已有对局（resume → 复用 startScript 进入流程；自动补建场景）
+  const doResumeScript = async () => {
+    if (!resumeSid.trim()) { setStatus('请输入对局 ID（session_id）'); return; }
+    setLoading(true);
+    try {
+      const game = await api.scriptResume({
+        game_id: resumeSid.trim(),
+        ...(resumeKey.trim() ? { player_key: resumeKey.trim() } : {}),
+      });
+      if (game?.error) { setStatus(game.error); setLoading(false); return; }
+      if (game?.session_id) store.setScriptSessionId(game.session_id);
+      setScriptGame(game);
+      if (game?.map) {
+        setScriptMap(game.map);
+        setScriptMapSearched(Array.isArray(game.searched_locations) ? game.searched_locations : []);
+      }
+      setScriptMyRole(game.your_role || '');
+      setScriptMySecret(game.your_secret || '');
+      setStatus(`正在进入已恢复的对局《${game.name || ''}》...`);
+      await startScript(game);
+      setStatus(`已恢复对局《${game.name || ''}》｜你的角色：${game.your_role || '未知'}｜阶段：${game.phase || ''}`);
+    } catch (e: any) {
+      setStatus(e.message || '恢复对局失败');
+    }
+    setLoading(false);
   };
 
   // 剧本杀：进入对局（建场景 → 启动会话 → 切 script 模式 → 刷新历史）
@@ -432,6 +605,10 @@ export function ScenePage() {
               <h2 style={{ margin: 0 }}>2D 模拟</h2>
               <div style={{ display: 'flex', gap: 8 }}>
                 <span className="status-pill">角色 {simChars.length}</span>
+                {/* P-0803-H（需求 8）：狼人杀模式默认 2D —— 2D 视图内直达聊天页游戏面板 */}
+                {mode === 'werewolf' && (
+                  <button className="btn btn-small btn-primary" onClick={() => store.goToView('chat')}>🎮 游戏面板（聊天页）</button>
+                )}
                 <button className="btn btn-small btn-danger" onClick={() => setShowPhaserSim(false)}>✕ 退出 2D（返回场景设置）</button>
               </div>
             </div>
@@ -443,10 +620,10 @@ export function ScenePage() {
         ) : (
           <>
         <div className="section-row" style={{ marginBottom: 24 }}>
-          <h2 style={{ margin: 0 }}>{isRulesMode ? '规则模式' : '场景设置'}</h2>
+          <h2 style={{ margin: 0 }}>{isRulesMode ? '规则模式' : '剧本选择'}</h2>
           <div style={{ display: 'flex', gap: 8 }}>
             <span className="status-pill">角色 {characters.length}</span>
-            {!isRulesMode && <span className="status-pill">场景 {scenes.length}</span>}
+            {!isRulesMode && <span className="status-pill">剧本 {scenes.length}</span>}
             <button className="btn" onClick={() => goToView('config')}>素材库</button>
           </div>
         </div>
@@ -456,14 +633,28 @@ export function ScenePage() {
           <div className="panel-body">
             <div className="section" style={{ marginBottom: 12 }}>
               <div className="section-row" style={{ marginBottom: 12 }}>
-                <div className="label" style={{ fontSize: 15, fontWeight: 600 }}>角色</div>
+                <div className="label" style={{ fontSize: 15, fontWeight: 600 }}>角色库</div>
                 <div style={{ display: 'flex', gap: 6 }}>
                   <button className="btn btn-small" onClick={() => setSelected(new Set(characters.map(c => c.name)))}>全选</button>
                   <button className="btn btn-small" onClick={() => setSelected(new Set())}>清空</button>
                   <button className="btn btn-small btn-primary" onClick={openNewChar}>+ 新建</button>
                 </div>
               </div>
-              {/* C-1（P3-11）：角色分类 + 排序（纯前端本地分组，不改后端数据结构） */}
+              {/* P-0803-H（需求 6）：角色卡按所属场景（剧本 default_roles）分类展示 + 自由角色卡页 */}
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
+                <button className={`chip ${charTab === 'all' ? 'active' : ''}`} onClick={() => setCharTab('all')}>全部</button>
+                {scriptGroups.map((s: any) => (
+                  <button key={s.scene_id} className={`chip ${charTab === s.scene_id ? 'active' : ''}`}
+                    onClick={() => { setCharTab(s.scene_id); setActiveScene(s); setOpenScript(s); }}>
+                    {s.name || s.scene_id}
+                  </button>
+                ))}
+                <button className={`chip ${charTab === 'free' ? 'active' : ''}`} onClick={() => setCharTab('free')}>自由角色卡</button>
+                <span style={{ fontSize: 11, color: 'var(--text-3)', marginLeft: 4 }}>
+                  {myCharName ? `我的角色「${myCharName}」每栏置顶 · 不默认勾选` : '（未绑定玩家角色）'}
+                </span>
+              </div>
+              {/* C-1（P3-11）：角色筛选 + 排序（已选/未选 + 名称 A-Z/Z-A） */}
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
                 <select className="input" style={{ width: 110, padding: '3px 6px', fontSize: 12 }} value={charFilter} onChange={e => setCharFilter(e.target.value as any)} title="角色分类：按选中状态筛选">
                   <option value="all">分类：全部</option>
@@ -475,10 +666,10 @@ export function ScenePage() {
                   <option value="az">排序：名称 A-Z</option>
                   <option value="za">排序：名称 Z-A</option>
                 </select>
-                <span style={{ fontSize: 12, color: 'var(--text-3)' }}>共 {sortedChars.length} / {characters.length} 个</span>
+                <span style={{ fontSize: 12, color: 'var(--text-3)' }}>共 {displayChars.length} / {characters.length} 个</span>
               </div>
               <div className="grid-list char-grid">
-                {/* Me 角色卡 — 2x2 大小，可点击可选择 */}
+                {/* Me 角色卡 — 玩家身份输入入口（P-0803-H 需求 7：不默认勾选） */}
                 {(() => {
                   const meSel = selected.has(currentPlayer);
                   // P0-1：玩家名与角色库同名 → 以角色为准（提示，不再被识别成玩家自己/导演）
@@ -523,21 +714,33 @@ export function ScenePage() {
                     </button>
                   );
                 })()}
-                {sortedChars.map(ch => {
+                {/* P-0803-H（需求 1/7）：每栏用户角色置顶（withMeFirst 已排序）+ 编辑/删除按钮 */}
+                {displayChars.map(ch => {
                   const sel = selected.has(ch.name);
                   const isDefault = WEREWOLF_DEFAULTS.includes(ch.name);
+                  const isMine = ch.name === myCharName;
                   return (
-                    <button key={ch.name}
-                      className={`char-card ${sel ? 'selected' : ''}`}
-                      onClick={() => toggleCharacter(ch.name)}
-                      onContextMenu={e => { e.preventDefault(); openEditChar(ch); }}
-                    >
-                      <div className="char-avatar">{ch.name[0]}</div>
-                      <div className="char-info">
-                        <div className="char-name">{ch.name}{isDefault && isRulesMode && rulesTab === 'ww' && <span style={{fontSize:10,color:'var(--text-2)',marginLeft:4}}>默认</span>}</div>
-                        <div className="char-tag">{sel ? '已选' : '点击选择'}</div>
-                      </div>
-                    </button>
+                    <div key={ch.name} className={`char-card-wrap ${isMine ? 'mine' : ''}`}>
+                      <button type="button"
+                        className={`char-card ${sel ? 'selected' : ''} ${isMine ? 'mine-card' : ''}`}
+                        onClick={() => toggleCharacter(ch.name)}
+                        onContextMenu={e => { e.preventDefault(); openEditChar(ch); }}
+                      >
+                        <div className="char-avatar">{ch.name[0]}</div>
+                        <div className="char-info">
+                          <div className="char-name">
+                            {ch.name}
+                            {isMine && <span style={{ fontSize: 10, color: '#7c4dff', marginLeft: 4 }}>我的</span>}
+                            {isDefault && isRulesMode && rulesTab === 'ww' && <span style={{ fontSize: 10, color: 'var(--text-2)', marginLeft: 4 }}>默认</span>}
+                          </div>
+                          <div className="char-tag">{sel ? '已选' : (isMine ? '未勾选（置顶）' : '点击选择')}</div>
+                        </div>
+                      </button>
+                      <span className="char-card-actions">
+                        <button className="btn btn-smallall" title={`编辑 ${ch.name}`} onClick={e => { e.stopPropagation(); openEditChar(ch); }}>✎</button>
+                        <button className="btn btn-smallall btn-danger" title={`删除 ${ch.name}`} onClick={e => { e.stopPropagation(); deleteChar(ch); }}>✕</button>
+                      </span>
+                    </div>
                   );
                 })}
                 {characters.length === 0 && (
@@ -548,70 +751,171 @@ export function ScenePage() {
           </div>
         </section>
 
-        {/* ===== Free Mode: Scene selection + Enter ===== */}
+        {/* ===== 一般模式：剧本选择（P-0803-H 需求 2/4/5：场景选择→剧本选择 + 分类 + 点开详情） ===== */}
         {!isRulesMode && (
           <>
             <section className="panel" style={{ border: 0, borderRadius: 8, marginTop: 24 }}>
               <div className="panel-body">
                 <div className="section" style={{ marginBottom: 12 }}>
-                  <div className="section-row" style={{ marginBottom: 12 }}>
-                    <div className="label" style={{ fontSize: 15, fontWeight: 600 }}>场景</div>
-                    <button className="btn btn-small btn-primary" onClick={openNewScene}>+ 新建</button>
-                  </div>
-                  {/* C-1（P3-11）：场景分类 + 排序（剧本杀对局场景（scene_id 前缀 script_）/普通场景分类，名称排序） */}
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
-                    <select className="input" style={{ width: 130, padding: '3px 6px', fontSize: 12 }} value={sceneFilter} onChange={e => setSceneFilter(e.target.value as any)} title="场景分类：剧本杀对局场景（scene_id 前缀 script_）与普通场景">
-                      <option value="all">分类：全部</option>
-                      <option value="script">分类：剧本杀对局</option>
-                      <option value="normal">分类：普通场景</option>
-                    </select>
-                    <select className="input" style={{ width: 110, padding: '3px 6px', fontSize: 12 }} value={sceneSort} onChange={e => setSceneSort(e.target.value as any)} title="场景排序">
-                      <option value="default">排序：默认</option>
-                      <option value="az">排序：名称 A-Z</option>
-                      <option value="za">排序：名称 Z-A</option>
-                    </select>
-                    <span style={{ fontSize: 12, color: 'var(--text-3)' }}>共 {sortedScenes.length} / {scenes.length} 个</span>
+                  <div className="section-row" style={{ marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+                    <div className="label" style={{ fontSize: 15, fontWeight: 600 }}>剧本选择</div>
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                      {/* 需求 4：场景分类 —— 一般模式 / 狼人杀模式 */}
+                      <button className={`chip ${scriptCategory === 'general' ? 'active' : ''}`} onClick={() => setScriptCategory('general')}>一般模式</button>
+                      <button className={`chip ${scriptCategory === 'werewolf' ? 'active' : ''}`} onClick={() => setScriptCategory('werewolf')}>狼人杀模式</button>
+                      <select className="input" style={{ width: 110, padding: '3px 6px', fontSize: 12 }} value={sceneSort} onChange={e => setSceneSort(e.target.value as any)} title="剧本排序">
+                        <option value="default">排序：默认</option>
+                        <option value="az">排序：名称 A-Z</option>
+                        <option value="za">排序：名称 Z-A</option>
+                      </select>
+                      <button className="btn btn-small btn-primary" onClick={openNewScene}>+ 新建剧本</button>
+                    </div>
                   </div>
                   <div className="grid-list">
-                  {sortedScenes.map((scene: Scene) => (
-                    <button key={scene.scene_id}
-                      className={`item-card ${activeScene?.scene_id === scene.scene_id ? 'selected' : ''}`}
-                      onClick={() => selectScene(scene)}
-                      onContextMenu={e => { e.preventDefault(); openEditScene(scene); }}
-                    >
-                      <div className="item-card-title">
-                        <span>{scene.name}</span>
-                        <span className="item-actions" onClick={e => e.stopPropagation()}>
-                          <button className="btn btn-small" onClick={() => openEditScene(scene)}>编辑</button>
-                          <button className="btn btn-small btn-danger" onClick={() => deleteScene(scene)}>删除</button>
-                        </span>
+                    {scriptCards.map((scene: Scene) => {
+                      const open = openScript?.scene_id === scene.scene_id;
+                      const defRoles = (scene.default_roles || []).filter(Boolean) as string[];
+                      return (
+                        <div key={scene.scene_id} className={`script-card-wrap ${open ? 'open' : ''}`}>
+                          <button
+                            className={`item-card script-card ${open ? 'selected' : ''}`}
+                            onClick={() => selectScript(scene)}
+                            onContextMenu={e => { e.preventDefault(); openEditScene(scene); }}
+                          >
+                            <div className="item-card-title">
+                              <span>{scene.name}</span>
+                              <span className="item-actions" onClick={e => e.stopPropagation()}>
+                                <button className="btn btn-small" onClick={() => openEditScene(scene)}>编辑</button>
+                                <button className="btn btn-small btn-danger" onClick={() => deleteScene(scene)}>删除</button>
+                              </span>
+                            </div>
+                            <div className="item-card-desc">{shortText(scene.description, 120)}</div>
+                            <div className="script-card-meta">
+                              <span className={`chip ${scene.category === 'werewolf' ? 'chip-ww' : 'chip-general'}`}>
+                                {scene.category === 'werewolf' ? '🐺 狼人杀模式' : '🎭 一般模式'}
+                              </span>
+                              <span className="chip">默认角色 {defRoles.length}</span>
+                              <span className="chip">{scene.default_map ? '🗺️ 已绑地图' : '🚫 无地图'}</span>
+                            </div>
+                          </button>
+                        </div>
+                      );
+                    })}
+                    {scriptCards.length === 0 && (
+                      <div className="muted" style={{ padding: 16, fontSize: 13, textAlign: 'center' }}>
+                        {scriptCategory === 'general'
+                          ? '还没有一般模式剧本，点击"+ 新建剧本"创建'
+                          : '还没有狼人杀模式剧本（开始一局狼人杀后自动生成）'}
                       </div>
-                      <div className="item-card-desc">{shortText(scene.description, 150)}</div>
-                    </button>
-                  ))}
-                  {scenes.length === 0 && (
-                    <div className="muted" style={{ padding: 16, fontSize: 13, textAlign: 'center' }}>还没有场景，点击"+ 新建"创建</div>
-                  )}
+                    )}
+                  </div>
                 </div>
-              </div>
               </div>
             </section>
 
-            <div style={{ display: 'flex', gap: 12, marginTop: 24, justifyContent: 'center', alignItems: 'center' }}>
-              <button className="btn btn-primary" disabled={selectedNames.length === 0 || !activeScene} onClick={start}>
-                进入场景（{selectedNames.length} 个角色）
-              </button>
-              <button
-                className="btn"
-                disabled={selectedNames.length < 2 || !activeScene}
-                onClick={openPhaserSim}
-                title="C-1：唯一 2D 入口 —— 内嵌 Phaser 3.90 渲染视图（左地图 + 右聊天，可折叠）；原「进入 2D 模拟」勾选已合并至此"
-              >
-                🎮 2D 模拟
-              </button>
-            </div>
+            {/* ── P-0803-H（需求 5）：点开剧本卡 → 角色卡栏 + 地图预览 + 进入操作 ── */}
+            {openScript && (
+              <section className="panel" style={{ border: '1px solid var(--accent, #49c16d)', borderRadius: 8, marginTop: 24 }}>
+                <div className="panel-body">
+                  <div className="section-row" style={{ marginBottom: 12 }}>
+                    <div className="label" style={{ fontSize: 15, fontWeight: 600 }}>
+                      📜 {openScript.name}（{openScript.category === 'werewolf' ? '🐺 狼人杀模式' : '🎭 一般模式'}）
+                    </div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button className="btn btn-small" onClick={() => openEditScene(openScript)}>编辑剧本</button>
+                      <button className="btn btn-small" onClick={() => setOpenScript(null)}>✕ 收起</button>
+                    </div>
+                  </div>
 
-        {/* ── P-0802-G：原内嵌 2D 视图块已上移为 2D 模式主体（showPhaserSim 时场景设置区整体折叠） ── */}
+                  {/* 角色卡栏（该剧本默认角色组；我的角色置顶不默认勾选，需求 5/7） */}
+                  <div className="label" style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
+                    角色卡栏（默认角色 {((openScript.default_roles || []).filter(Boolean) as string[]).length} 个）
+                  </div>
+                  <div className="grid-list char-grid" style={{ marginBottom: 16 }}>
+                    {withMeFirst(
+                      (openScript.default_roles || []).filter(Boolean).map((nm: string) =>
+                        characters.find(c => c.name === nm)
+                      ).filter(Boolean)
+                    ).map((ch: Character) => {
+                      const sel = selected.has(ch.name);
+                      const isMine = ch.name === myCharName;
+                      return (
+                        <div key={ch.name} className={`char-card-wrap ${isMine ? 'mine' : ''}`}>
+                          <button type="button"
+                            className={`char-card ${sel ? 'selected' : ''} ${isMine ? 'mine-card' : ''}`}
+                            onClick={() => toggleCharacter(ch.name)}
+                            onContextMenu={e => { e.preventDefault(); openEditChar(ch); }}
+                          >
+                            <div className="char-avatar">{ch.name[0]}</div>
+                            <div className="char-info">
+                              <div className="char-name">
+                                {ch.name}
+                                {isMine && <span style={{ fontSize: 10, color: '#7c4dff', marginLeft: 4 }}>我的</span>}
+                              </div>
+                              <div className="char-tag">{sel ? '已选' : (isMine ? '未勾选（置顶）' : '点击选择')}</div>
+                            </div>
+                          </button>
+                          <span className="char-card-actions">
+                            <button className="btn btn-smallall" title={`编辑 ${ch.name}`} onClick={e => { e.stopPropagation(); openEditChar(ch); }}>✎</button>
+                            <button className="btn btn-smallall btn-danger" title={`删除 ${ch.name}`} onClick={e => { e.stopPropagation(); deleteChar(ch); }}>✕</button>
+                          </span>
+                        </div>
+                      );
+                    })}
+                    {!((openScript.default_roles || []).filter(Boolean) as string[]).length && (
+                      <div className="muted" style={{ padding: 12, fontSize: 12, textAlign: 'center' }}>
+                        该剧本尚未绑定默认角色组 —— 点「编辑剧本」从角色库勾选默认角色
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 地图预览（默认地图 → Phaser 渲染；无 → 占位 + 编辑弹窗内可生成，需求 3/5） */}
+                  <div className="label" style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>地图预览</div>
+                  {openScript.default_map ? (
+                    <PhaserScriptMapView map={openScript.default_map} playerName={currentPlayer} height={320} />
+                  ) : (
+                    <div style={{ fontSize: 12, color: 'var(--text-3)', padding: 10, border: '1px dashed var(--border, #334155)', borderRadius: 8, marginBottom: 8 }}>
+                      尚未绑定默认地图 —— 点「编辑剧本」→「🗺️ 生成默认地图」（BSP 确定性生成），保存后此处显示预览。
+                    </div>
+                  )}
+
+                  {/* 进入操作（需求 8：一般模式给「是否 2D」选择；狼人杀模式默认 2D） */}
+                  <div style={{ display: 'flex', gap: 12, marginTop: 16, justifyContent: 'center', alignItems: 'center', flexWrap: 'wrap' }}>
+                    {openScript.category === 'werewolf' ? (
+                      <>
+                        <button className="btn btn-primary" disabled={selectedNames.length < 5} onClick={startWWGame}>
+                          开始狼人杀（{selectedNames.length} 个角色）
+                        </button>
+                        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, cursor: 'pointer' }}>
+                          <input type="checkbox" checked={wwEnable2D} onChange={e => setWwEnable2D(e.target.checked)} />
+                          🎮 默认 2D（开启后开局自动进入 2D 视图）
+                        </label>
+                        {store.werewolfSessionId && (
+                          <button className="btn" onClick={() => store.goToView('chat')}>🎮 继续对局（进入聊天页）</button>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <button className="btn btn-primary" disabled={selectedNames.length === 0} onClick={() => (enable2D ? openPhaserSim() : start())}>
+                          {enable2D ? '进入剧本（2D 模拟）' : `进入剧本（${selectedNames.length} 个角色）`}
+                        </button>
+                        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, cursor: 'pointer' }}>
+                          <input type="checkbox" checked={enable2D} onChange={e => setEnable2D(e.target.checked)} />
+                          是否 2D 模拟（勾选后不进聊天页，直接打开 2D 视图）
+                        </label>
+                      </>
+                    )}
+                  </div>
+                  {openScript.category === 'werewolf' && selectedNames.length < 5 && (
+                    <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 8, textAlign: 'center' }}>
+                      狼人杀至少 5 人：你的角色卡已置顶未自动勾选，不足 5 人时请手动勾选。
+                    </div>
+                  )}
+                </div>
+              </section>
+            )}
+
+            {/* ── P-0802-G：原内嵌 2D 视图块已上移为 2D 模式主体（showPhaserSim 时场景设置区整体折叠） ── */}
           </>
         )}
 
@@ -675,6 +979,14 @@ export function ScenePage() {
                   <button className="btn btn-primary" disabled={selectedNames.length < 5} onClick={startWWGame}>
                     开始狼人杀（{selectedNames.length} 个角色）
                   </button>
+                  {/* P-0803-H（需求 8）：狼人杀模式默认 2D —— checkbox 默认勾选，开局自动进入 2D 视图 */}
+                  <label style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: 13, cursor: 'pointer', marginLeft: 8 }}>
+                    <input type="checkbox" checked={wwEnable2D} onChange={e => setWwEnable2D(e.target.checked)} />
+                    🎮 默认 2D
+                  </label>
+                  {store.werewolfSessionId && (
+                    <button className="btn" style={{ marginLeft: 8 }} onClick={() => store.goToView('chat')}>🎮 继续对局（进入聊天页）</button>
+                  )}
                   <button className="btn btn-small" style={{marginLeft:8}} onClick={() => setShowAdvanced(!showAdvanced)}>
                     {showAdvanced ? '收起' : '高级选项'}
                   </button>
@@ -721,6 +1033,24 @@ export function ScenePage() {
                   <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
                     <button className="btn btn-primary" disabled={!scriptPrompt || generating} onClick={genScript}>
                       {generating ? '生成中...' : 'AI 生成剧本'}
+                    </button>
+                  </div>
+                  {/* P-0803-H2：恢复对局（重连）—— 对局不在场景列表，刷新/重启后从这里找回 */}
+                  <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <input
+                      value={resumeSid}
+                      onChange={e => setResumeSid(e.target.value)}
+                      placeholder="对局 ID（session_id）"
+                      style={{ flex: 1, minWidth: 160 }}
+                    />
+                    <input
+                      value={resumeKey}
+                      onChange={e => setResumeKey(e.target.value)}
+                      placeholder="player_key（可选，默认以 me 身份）"
+                      style={{ flex: 1, minWidth: 160 }}
+                    />
+                    <button className="btn" disabled={loading || !resumeSid.trim()} onClick={doResumeScript}>
+                      {loading ? '恢复中...' : '↻ 恢复对局（重连）'}
                     </button>
                   </div>
                   {scriptGame && (
@@ -822,21 +1152,65 @@ export function ScenePage() {
           </div>
         )}
 
-        {/* ===== Scene Modal ===== */}
+        {/* ===== Scene Modal（P-0803-H：剧本卡编辑 —— 分类 / 默认角色组 / 默认地图） ===== */}
         {modalType === 'scene' && (
           <div className="modal-overlay" onClick={closeModal}>
-            <div className="modal" onClick={e => e.stopPropagation()} style={{ width: 500 }}>
+            <div className="modal" onClick={e => e.stopPropagation()} style={{ width: 560, maxHeight: '86vh', display: 'flex', flexDirection: 'column' }}>
               <div className="modal-header">
-                <h3>{editTarget ? '编辑场景' : '新建场景'}</h3>
+                <h3>{editTarget ? '编辑剧本' : '新建剧本'}</h3>
                 <button className="btn btn-small" onClick={closeModal}>X</button>
               </div>
-              <div className="modal-body">
+              <div className="modal-body" style={{ overflowY: 'auto', flex: 1 }}>
                 <div className="form-grid">
-                  <input value={formName} onChange={e => setFormName(e.target.value)} placeholder="场景名" />
-                  <textarea value={formDesc} onChange={e => setFormDesc(e.target.value)} placeholder="场景描述：地点、冲突、已知事实、开局状态等" rows={5} />
+                  <input value={formName} onChange={e => setFormName(e.target.value)} placeholder="剧本名" />
+                  {/* 需求 4：场景分类 —— 一般模式 / 狼人杀模式 */}
+                  <div className="form-row" style={{ alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 12, color: 'var(--text-2)', whiteSpace: 'nowrap' }}>分类：</span>
+                    <button className={`chip ${formCategory === 'general' ? 'active' : ''}`} onClick={() => setFormCategory('general')}>一般模式</button>
+                    <button className={`chip ${formCategory === 'werewolf' ? 'active' : ''}`} onClick={() => setFormCategory('werewolf')}>狼人杀模式</button>
+                  </div>
+                  <textarea value={formDesc} onChange={e => setFormDesc(e.target.value)} placeholder="剧本描述：地点、冲突、已知事实、开局状态等" rows={3} />
                   <div className="form-row">
                     <input style={{ flex: 1 }} value={formKeyword} onChange={e => setFormKeyword(e.target.value)} onKeyDown={e => e.key === 'Enter' && generateScene()} placeholder="AI 生成：输入关键词" />
                     <button className="btn" disabled={generating} onClick={generateScene}>{generating ? '生成中...' : 'AI 生成'}</button>
+                  </div>
+                  {/* 默认角色组（需求 3）：从角色库勾选，选择剧本时自动带上 */}
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
+                      默认角色组（选择剧本时自动带上）—— 已选 {formDefaultRoles.size} 个
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, maxHeight: 110, overflowY: 'auto', border: '1px solid var(--border, #334155)', borderRadius: 6, padding: 6 }}>
+                      {characters.length === 0 && <span style={{ fontSize: 12, color: 'var(--text-3)' }}>暂无角色，先到角色库新建</span>}
+                      {characters.map(c => (
+                        <label key={c.name} style={{ display: 'inline-flex', gap: 4, alignItems: 'center', fontSize: 12, cursor: 'pointer', padding: '2px 6px', borderRadius: 4, background: formDefaultRoles.has(c.name) ? 'rgba(102,126,234,.15)' : 'transparent' }}>
+                          <input
+                            type="checkbox"
+                            checked={formDefaultRoles.has(c.name)}
+                            onChange={e => setFormDefaultRoles(prev => { const n = new Set(prev); e.target.checked ? n.add(c.name) : n.delete(c.name); return n; })}
+                          />
+                          {c.name}
+                          {c.player_id === playerId ? '（我的）' : ''}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                  {/* 默认地图（需求 3）：BSP 确定性生成 → 预览 → 保存 */}
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>默认地图（点开剧本卡后地图预览）</div>
+                    {formDefaultMap ? (
+                      <>
+                        <PhaserScriptMapView map={formDefaultMap} playerName={currentPlayer} height={200} />
+                        <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                          <button className="btn btn-small" disabled={mapGenBusy} onClick={genDefaultMap}>{mapGenBusy ? '生成中...' : '🔄 重新生成'}</button>
+                          <button className="btn btn-small btn-danger" onClick={() => setFormDefaultMap('')}>清除地图</button>
+                        </div>
+                      </>
+                    ) : (
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <button className="btn btn-small" disabled={mapGenBusy} onClick={genDefaultMap}>{mapGenBusy ? '生成中...' : '🗺️ 生成默认地图'}</button>
+                        <span style={{ fontSize: 11, color: 'var(--text-3)' }}>BSP 确定性生成（契约 v1），保存后生效</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

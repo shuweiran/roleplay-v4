@@ -131,6 +131,14 @@ export const api = {
   createScene: (data: any) => request<any>('/api/scenes', { method: 'POST', body: JSON.stringify(data) }),
   updateScene: (id: string, data: any) => request<any>(`/api/scenes/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteScene: (id: string) => request<any>(`/api/scenes/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  /**
+   * P-0803-H：剧本默认地图生成（BSP 确定性生成，契约 v1；零 LLM 零成本）——
+   * 剧本编辑弹窗「生成默认地图」绑定到剧本卡 default_map；同 seed 同输出。
+   */
+  sceneMap: (seed?: number) => request<{ map: any }>('/api/scenes/map', {
+    method: 'POST',
+    body: JSON.stringify(seed ? { seed } : {}),
+  }),
   generateScene: (keywords: string) => request<any>('/api/scenes/generate', { method: 'POST', body: JSON.stringify({ keywords }) }),
   generateCharacter: (keywords: string) => request<any>('/api/characters/generate', { method: 'POST', body: JSON.stringify({ keywords }) }),
   startScene: (sceneId: string, agents: string[], me?: string, characterDetails?: Array<{ name: string; persona?: string; voice?: string; background?: string }>) => {
@@ -200,10 +208,10 @@ export const api = {
   scriptInit: (theme: string, players: string[]) =>
     // P-0803-F：120s → 300s —— init 自动串联后 = 剧本 LLM + 地图 LLM 两次串行（各 30-90s），
     // 120s 必然触发 abort（"signal is aborted without reason"）。300s 覆盖正常+地图降级最坏路径。
-    request<any>('/api/script/init', { method: 'POST', body: JSON.stringify({ theme, players }), timeout: 300000 }),
+    request<any>('/api/script/init', { method: 'POST', body: JSON.stringify({ theme, players }), timeout: 600000 }), // P-0803-H2: 300s→600s，后端最坏 450s（剧本 180s+地图 270s 双重试）仍可能超 300s
   /** 阶段 2: 生成/获取对局地图（LLM 统一路径 → 校验 → BSP 降级，契约 v1） */
   scriptMap: (body: { session_id?: string; theme?: string; seed?: number; regenerate?: boolean }) =>
-    request<any>('/api/script/map', { method: 'POST', body: JSON.stringify(body), timeout: 300000 }),
+    request<any>('/api/script/map', { method: 'POST', body: JSON.stringify(body), timeout: 600000 }),
   scriptStatus: (player?: string) =>
     request<any>(`/api/script/status?player=${encodeURIComponent(player || '')}`),
   scriptSearch: (player: string, location: string) =>
