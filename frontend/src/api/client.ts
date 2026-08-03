@@ -43,6 +43,14 @@ async function request<T>(url: string, options?: RequestInit & { timeout?: numbe
       // 200 但内容不是合法 JSON（如空字符串/纯文本）→ 不崩，视为成功空结果
       return null as unknown as T;
     }
+  } catch (e: any) {
+    // P-0803-F：超时 abort 友好化 —— Chromium 对 AbortSignal.abort() 的 fetch 失败抛
+    // DOMException "signal is aborted without reason"，直接透传给用户是英文原始错误且误导
+    // （后端 LLM 可能仍在生成，对局实际已创建）。转为明确中文提示，避免用户重复点击。
+    if (e?.name === 'AbortError' || /aborted without reason/i.test(String(e?.message || ''))) {
+      throw new Error(`请求超时：AI 生成耗时较长（剧本+地图两次 LLM 串行），后端可能仍在生成。请勿重复点击，稍后刷新查看对局状态。`);
+    }
+    throw e;
   } finally {
     clearTimeout(timer);
     _controllers.delete(cid);
@@ -190,10 +198,12 @@ export const api = {
     request<any>('/api/werewolf/discussion_say', { method: 'POST', body: JSON.stringify({ player, message }) }),
   // 剧本杀 (Script murder mystery)
   scriptInit: (theme: string, players: string[]) =>
-    request<any>('/api/script/init', { method: 'POST', body: JSON.stringify({ theme, players }), timeout: 120000 }), // P-0802-L: LLM 剧本生成真实耗时可达 70s+，60s 默认超时会 abort（scriptMap 同路径已用 120s，对齐）
+    // P-0803-F：120s → 300s —— init 自动串联后 = 剧本 LLM + 地图 LLM 两次串行（各 30-90s），
+    // 120s 必然触发 abort（"signal is aborted without reason"）。300s 覆盖正常+地图降级最坏路径。
+    request<any>('/api/script/init', { method: 'POST', body: JSON.stringify({ theme, players }), timeout: 300000 }),
   /** 阶段 2: 生成/获取对局地图（LLM 统一路径 → 校验 → BSP 降级，契约 v1） */
   scriptMap: (body: { session_id?: string; theme?: string; seed?: number; regenerate?: boolean }) =>
-    request<any>('/api/script/map', { method: 'POST', body: JSON.stringify(body), timeout: 120000 }),
+    request<any>('/api/script/map', { method: 'POST', body: JSON.stringify(body), timeout: 300000 }),
   scriptStatus: (player?: string) =>
     request<any>(`/api/script/status?player=${encodeURIComponent(player || '')}`),
   scriptSearch: (player: string, location: string) =>
