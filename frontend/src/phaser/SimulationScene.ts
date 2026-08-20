@@ -26,8 +26,8 @@ export interface SceneCallbacks {
    * （服务端权威坐标 + 方向×步长设目标 + 刷新 manualTarget 时间戳；按住时高频 ~120ms 一次）。
    */
   onMoveDir?: (agentName: string, dx: number, dy: number) => void;
-  /** P-0803-G：群组框「💬 加入对话 / 🚪 离开对话」按钮点击 → 组件层调 join/leave API */
-  onGroupAction: (groupId: string, action: 'join' | 'leave') => void;
+  /** 群组框操作：玩家可加入/离开；导演模式可旁听，不改变后端成员或轨道。 */
+  onGroupAction: (groupId: string, action: 'join' | 'leave' | 'observe') => void;
   /**
    * P-0813-D：点击命中 agent（NPC 或玩家角色自身）→ 上抛组件层触发对话开始。
    * 命中判定：点击点与某 agent 距离 ≤ 32px（agent 视觉半径 12 + 容差）。
@@ -1101,9 +1101,12 @@ export class SimulationScene extends Phaser.Scene {
       const pad = 15;
       // P-0803-G：玩家加入/离开入口（群组框右上角悬浮按钮）
       // P-0813-K：加入按钮仅在玩家接近该群时显示（approachable 命中）；离开按钮不受距离限制
-      if (playerInWorld && grp.id) {
+      if (grp.id) {
         const inGroup = members.includes(pn);
-        if (inGroup) {
+        if (!playerInWorld) {
+          // 导演没有可加入世界的角色：也必须有可点的旁听入口，不能让群组框只是装饰。
+          this.drawGroupButton(grp.id, 'observe', maxX + pad, minY - pad, mc);
+        } else if (inGroup) {
           this.drawGroupButton(grp.id, 'leave', maxX + pad, minY - pad, mc);
         } else if (grp.mode !== 'DYAD' && approachable.has(grp.id)) {
           // DYAD 后端上限 2（1v1 语义，调研 §4.2 #5）——玩家不在组内时必满，不提供加入入口
@@ -1119,9 +1122,9 @@ export class SimulationScene extends Phaser.Scene {
     }
   }
 
-  /** P-0803-G：群组加入/离开悬浮按钮（群组框右上角，点击 → onGroupAction 上抛组件层调 API） */
-  private drawGroupButton(groupId: string, action: 'join' | 'leave', right: number, top: number, color: number) {
-    const text = action === 'join' ? '💬 加入对话' : '🚪 离开对话';
+  /** 群组悬浮操作按钮（导演模式的旁听不触及后端成员）。 */
+  private drawGroupButton(groupId: string, action: 'join' | 'leave' | 'observe', right: number, top: number, color: number) {
+    const text = action === 'join' ? '💬 加入对话' : action === 'leave' ? '🚪 离开对话' : '👁 旁听对话';
     const w = 92;
     const h = 22;
     const x = right - w;

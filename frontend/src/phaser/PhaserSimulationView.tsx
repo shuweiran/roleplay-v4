@@ -563,17 +563,23 @@ export function PhaserSimulationView({ characters, scene = 'park', map, height, 
   const allMsgs = useMemo(() => {
     return [...worldMsgs, ...localMsgs].sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0));
   }, [worldMsgs, localMsgs]);
+  /** 右侧只呈现当前被点击/加入的组；没有选组时不泄露全世界混杂对话。 */
+  const activeMsgs = useMemo(() => {
+    const groupId = joinedGroup?.id;
+    if (!groupId) return [];
+    return allMsgs.filter(m => m.group === groupId || (m.kind !== 'world' && m.group === groupId));
+  }, [allMsgs, joinedGroup?.id]);
 
   // 新消息自动滚动到底部（C-2：仅在新消息到达或本就在底部时滚动，避免打字机逐字刷新时打断上翻阅读）
   const prevLenRef = useRef(0);
   useEffect(() => {
     const el = chatListRef.current;
     if (!el) return;
-    const lenIncreased = allMsgs.length !== prevLenRef.current;
-    prevLenRef.current = allMsgs.length;
+    const lenIncreased = activeMsgs.length !== prevLenRef.current;
+    prevLenRef.current = activeMsgs.length;
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
     if (lenIncreased || nearBottom) el.scrollTop = el.scrollHeight;
-  }, [allMsgs.length, chatOpen, bump]);
+  }, [activeMsgs.length, chatOpen, bump]);
 
   const pushLocal = (m: { who: string; text: string; kind: 'player' | 'system' }) => {
     setLocalMsgs(prev => [...prev, { id: 'l-' + (localSeqRef.current++), who: m.who, text: m.text, kind: m.kind, status: 'done' as ChatMsgStatus, ts: Date.now() }]);
@@ -653,7 +659,20 @@ export function PhaserSimulationView({ characters, scene = 'park', map, height, 
 
   /**
    * P-0803-G：群组「加入/离开对话」按钮点击后join/leave API → 成功/失败可见提示；手动刷新一次状态。   * 后端错误（组不存在/重复加入/已在组等）message 原样展示（聊天面板系统消耗+ 地图角标）：   */
-  const handleGroupAction = useCallback(async (groupId: string, action: 'join' | 'leave') => {
+  const handleGroupAction = useCallback(async (groupId: string, action: 'join' | 'leave' | 'observe') => {
+    if (action === 'observe') {
+      const selected = groups.find(g => g.id === groupId) ?? null;
+      if (!selected) {
+        setJoinMsg({ kind: 'error', text: '该会话组已结束，请等待下一次聚集。' });
+        return;
+      }
+      setJoinedGroup(selected);
+      setGalView(false);
+      setGalOpen(false);
+      setChatOpen(true);
+      setJoinMsg({ kind: 'ok', text: `正在旁听：${selected.participants?.join('、') || selected.id}` });
+      return;
+    }
     const hasPlayer = Boolean((playerNameRef.current || '').trim());
     // 导演模式没有可加入世界的玩家角色：点组只打开经典观察视图，绝不伪造 "me" 发言或加入轨道。
     // AI 组本身仍由后端 ConversationManager 正常自动推进。
@@ -926,7 +945,7 @@ export function PhaserSimulationView({ characters, scene = 'park', map, height, 
             <div
               style={{ padding: '6px 12px', fontSize: 12, color: 'var(--text-2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', flexShrink: 0 }}
             >
-              <span title={simChatConfigSummary()}>💬 对话与发言 {allMsgs.length > 0 ? `（${allMsgs.length} 条）` : ''}</span>
+              <span title={simChatConfigSummary()}>💬 {joinedGroup?.participants?.join('、') || '会话组'} {activeMsgs.length > 0 ? `（${activeMsgs.length} 条）` : ''}</span>
               <span style={{ display: 'flex', gap: 6 }}>
                 {/* P-0813-G：对话中 → 「退出对话」按钮（回到自由探索；面板淡出/隐藏） */}
                 {galChat && galView && galOpen && (
@@ -968,10 +987,12 @@ export function PhaserSimulationView({ characters, scene = 'park', map, height, 
             ) : (
               <>
                 <div className="sim-chat-list" ref={chatListRef}>
-                  {allMsgs.length === 0 && (
-                    <div style={{ color: 'var(--text-3)', padding: '4px 0' }}>暂无对话——2D 世界角色会自动相遇交谈</div>
+                  {activeMsgs.length === 0 && (
+                    <div style={{ color: 'var(--text-3)', padding: '4px 0', lineHeight: 1.7 }}>
+                      正在旁听该组。AI 会在下一次调度后自动发言；当前成员：{joinedGroup?.participants?.join('、') || '未知'}。
+                    </div>
                   )}
-                  {allMsgs.map(m => (
+                  {activeMsgs.map(m => (
                     <div key={m.id} className={`sim-chat-msg kind-${m.kind} status-${m.status}${isSilenceText(m.text) ? ' silence' : ''}`}>
                       <strong className="who">{m.who}：</strong>
                       {/* C-2：播放中的消息按打字机进度逐字显示（revealRef 驱动，3 字/秒）；静默占位（……（沉默））渲染为静默样式。*/}
