@@ -37,15 +37,15 @@ export function ScriptDmPanel({ sessionId, onClose }: { sessionId: string; onClo
     try {
       const [status, keys] = await Promise.all([
         api.scriptDmStatus(sessionId, dmKey || undefined),
-        api.scriptKeys(sessionId),
+        api.scriptKeys(sessionId, dmKey || undefined),
       ]);
       if (aliveRef.current) {
         setDm(status);
         setPlayerKeys(keys.player_keys || {});
-        setErr(status.error ? `⚠️ ${status.error}` : '');
+        setErr(status.error ? formatDmError(status.error) : '');
       }
     } catch (e: any) {
-      if (aliveRef.current) setErr('❌ ' + (e.message || 'DM 状态获取失败'));
+      if (aliveRef.current) setErr(formatDmError(e.message || 'DM 状态获取失败'));
     }
   };
 
@@ -75,7 +75,7 @@ export function ScriptDmPanel({ sessionId, onClose }: { sessionId: string; onClo
       else setMsg(`✅ 已推进 → ${SCRIPT_PHASE_LABEL[r.phase] || r.phase}${r.message ? `（${r.message}）` : ''}`);
       await refresh();
     } catch (e: any) {
-      setErr('❌ ' + (e.message || '推进失败'));
+      setErr(formatDmError(e.message || '推进失败'));
     }
     setBusy(false);
   };
@@ -86,7 +86,7 @@ export function ScriptDmPanel({ sessionId, onClose }: { sessionId: string; onClo
       await api.approvalApprove(sessionId);
       setMsg('✅ 已批准揭晓');
       await refresh();
-    } catch (e: any) { setErr('❌ ' + (e.message || '批准失败')); }
+    } catch (e: any) { setErr(formatDmError(e.message || '批准失败')); }
     setBusy(false);
   };
 
@@ -96,7 +96,7 @@ export function ScriptDmPanel({ sessionId, onClose }: { sessionId: string; onClo
       await api.approvalReject(sessionId);
       setMsg('已驳回揭晓（回滚至投票阶段）');
       await refresh();
-    } catch (e: any) { setErr('❌ ' + (e.message || '驳回失败')); }
+    } catch (e: any) { setErr(formatDmError(e.message || '驳回失败')); }
     setBusy(false);
   };
 
@@ -141,6 +141,11 @@ export function ScriptDmPanel({ sessionId, onClose }: { sessionId: string; onClo
             onChange={e => saveDmKey(e.target.value)}
           />
           <button className="btn btn-small" disabled={busy} onClick={refresh}>连接</button>
+        </div>
+        {/* P-0815-F 批2（方向3）：DM key 首屏说明 —— 与「🔑 角色令牌」区分概念（报告 §4.3 缺口） */}
+        <div style={{ marginTop: 6, fontSize: 11, color: 'var(--text-3)', lineHeight: 1.6 }}>
+          🎛 <strong>DM key</strong>：后端配置 <code>roleplay.game.dm.key</code> 时的主持人口令（<strong>留空 = 未启用</strong>，直接连接即可）；
+          与下方「🔑 角色令牌」（玩家重连凭证，每个玩家一个）是两个不同概念。
         </div>
       </div>
 
@@ -280,6 +285,15 @@ export function ScriptDmPanel({ sessionId, onClose }: { sessionId: string; onClo
       {err && <div style={{ padding: '0 10px 8px', fontSize: 12, color: '#ff5252' }}>{err}</div>}
     </div>
   );
+}
+
+/** DM 未连接是常态，不把安全拒绝渲染成看似系统故障的裸 HTTP 403。 */
+function formatDmError(raw: string): string {
+  const message = String(raw || '');
+  if (/403|forbidden|未授权/i.test(message)) {
+    return 'ℹ️ 主持人面板未连接：当前部署启用了 DM 鉴权，请输入正确的 DM key；普通玩家不受影响。';
+  }
+  return '❌ ' + (message || 'DM 请求失败');
 }
 
 /** 下一阶段（仅用于按钮文案；实际推进由后端状态机决定） */

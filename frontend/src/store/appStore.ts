@@ -1,4 +1,4 @@
-﻿import { create } from 'zustand';
+import { create } from 'zustand';
 import type { Character, AppMessage, TrackConfig, Task, WerewolfPhase, WerewolfPlayer, Announcement } from '../types';
 import { api, cancelAllRequests, getPlayerId } from '../api/client';
 
@@ -6,6 +6,8 @@ interface AppState {
   initialized: boolean;
   characters: Character[];
   scenes: any[];
+    /** P-0804-H 续：当前场景绑定的 default_map（进入场景时从 scenes 解析；一般模式 ChatPage 显示瓦片地图用） */
+    currentSceneMap: any;
   agents: string[];
   currentRound: number;
   isRunning: boolean;
@@ -51,6 +53,23 @@ interface AppState {
   scriptReveal: any;
   /** P-0802-J：剧本杀对局 session_id（SSE 会话定向连接与重连定位用） */
   scriptSessionId: string;
+  /** P-0805-A（B1）：剧本杀本人 roleKey（讨论发言身份校验；status 响应 role_key 发放） */
+  scriptRoleKey: string;
+  /** P-0816-H（UI 重设计阶段一）：投票进度聚合（GET /api/script/vote/status + SSE script_vote_progress，3s 轮询兜底） */
+  scriptVoteProgress: any;
+  /** P-0816-H（UI 重设计阶段一）：目标 HUD（GET /api/script/goal + SSE script_goal，3s 轮询兜底） */
+  scriptGoal: any;
+  /** P-0816-R（UI 重设计阶段二 API-3/4，决策 U1）：心锁状态（GET /api/script/locks + SSE script_locks；locks:[{role,lock_count,unlock_clue_ids,unlocked}]） */
+  scriptLocks: any;
+  /** P-0816-R（UI 重设计阶段二 API-5）：质询事件流（SSE script_press —— 服务端 pressed 标记驱动的矛盾点角标） */
+  scriptPressEvents: Array<{ target: string; pressed_by: string; message_id?: string; contradiction?: boolean }>;
+  /** P-0816-M（对局页按原型重构）：讨论实时发言流（script_speech SSE，主区 VN 对话流即时展示） */
+  scriptSpeechTurns: Array<{ speaker: string; message: string }>;
+  /** P-0816-T（阶段三，决策 U3）：团队信任度前端近似 —— 初始 5/5，本人投票与 most_voted 不一致时 -1
+   *  （仅前端展示态，标注「本地近似」；服务端模型 API-12 P2 缓做） */
+  scriptTrust: number;
+  /** P-0816-T：本人本局投票（suspect 名；投票成功时记录，script_reveal 到达后与 most_voted 比对扣信任度） */
+  scriptMyVote: string;
   /** P-0802-P1-demo：玩家身份 player_id（客户端生成 + localStorage 持久化，改造方案 §3.1） */
   playerId: string;
   /** P-0802-P4：已绑定角色名（「玩家本人角色」；localStorage 持久化镜像，对齐 getPlayerId 先例，改造方案 §6 Phase 4） */
@@ -96,6 +115,11 @@ interface AppState {
   setMode: (mode: string, protagonist?: string, directorCharacter?: string) => Promise<void>;
   setGoals: (goals: string[]) => Promise<void>;
   setCurrentRound: (r: number) => void;
+  /** P-0814-A/C：播放完毕自动推进 —— 经典视图（ChatPage）「播出完毕待推进」标志
+   *  （round_complete 置位；ChatMessageFlow 自动 POST /api/simulation/playback_done → 清除）。 */
+  playbackArmed: boolean;
+  /** P-0814-A/C：经典视图播放完毕自动推进标志（round_complete 置位；自动推进 effect 消费/新会话清除） */
+  setPlaybackArmed: (v: boolean) => void;
   setCharStatus: (name: string, status: 'active' | 'silent' | 'offline') => void;
   setHistoryFilter: (name: string | null) => void;
   goHome: () => void;
@@ -129,6 +153,23 @@ interface AppState {
   setScriptReveal: (r: any) => void;
   /** P-0802-J：剧本杀对局 session_id（SSE 会话定向连接与重连定位用） */
   setScriptSessionId: (v: string) => void;
+  /** P-0816-P2：剧本杀本人 roleKey setter（🎭 扮演入口写入，localStorage 镜像，供讨论/投票/重连身份校验） */
+  setScriptRoleKey: (v: string) => void;
+  /** P-0816-H：投票进度聚合写入（SSE/轮询） */
+  setScriptVoteProgress: (v: any) => void;
+  /** P-0816-H：目标 HUD 写入（SSE/轮询） */
+  setScriptGoal: (v: any) => void;
+  /** P-0816-R：心锁状态写入（GET /api/script/locks + SSE script_locks） */
+  setScriptLocks: (v: any) => void;
+  /** P-0816-R：质询事件追加（SSE script_press —— 服务端 pressed 标记驱动的矛盾点角标） */
+  addScriptPressEvent: (e: any) => void;
+  /** P-0816-T（阶段三 U3）：团队信任度前端近似 —— setScriptTrust 扣减/重置（初始 5） */
+  setScriptTrust: (t: number) => void;
+  /** P-0816-T：记录本人本局投票（投票成功时调用；script_reveal 比对用） */
+  setScriptMyVote: (suspect: string) => void;
+  /** P-0816-M：讨论实时发言追加 / 清空（阶段切换时） */
+  addScriptSpeechTurn: (t: { speaker: string; message: string }) => void;
+  clearScriptSpeechTurns: () => void;
   // ── P-0802-M：后端真·流式（agent_token 增量累积渲染） ──
   /** 流式增量缓冲（按 agent 名累积，暂停时仅缓冲不渲染） */
   streamingByAgent: Record<string, string>;
@@ -172,6 +213,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   initialized: false,
   characters: [],
   scenes: [],
+    currentSceneMap: null,
   agents: [],
   currentRound: 0,
   isRunning: false,
@@ -186,6 +228,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   messages: [],
   currentTasks: [],
   historyFilter: null,
+  /** P-0814-A：经典视图播放完毕自动推进标志（默认 false=旧行为；round_complete 后置位） */
+  playbackArmed: false,
   statusPhase: '就绪',
   charStatuses: {},
   roomCode: localStorage.getItem('roomCode') || '',
@@ -222,6 +266,16 @@ export const useAppStore = create<AppState>((set, get) => ({
   scriptReveal: null,
   // P-0802-J：剧本杀对局 session_id（SSE 定向连接 + 重连定位）
   scriptSessionId: '',
+  // P-0805-A（B1）：剧本杀本人 roleKey（status 响应 role_key 发放；讨论发言身份校验）
+  scriptRoleKey: '',
+  // P-0816-H（UI 重设计阶段一）：投票进度聚合 / 目标 HUD（SSE 优先 + 3s 轮询兜底）
+  scriptVoteProgress: null,
+  scriptGoal: null,
+  scriptLocks: null,
+  scriptPressEvents: [],
+  scriptSpeechTurns: [],
+  scriptTrust: 5,
+  scriptMyVote: '',
   // P-0802-M：后端真·流式（agent_token 增量缓冲 + 暂停标志）
   streamingByAgent: {},
   streamPaused: false,
@@ -376,11 +430,19 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
     const data = await api.startScene(sceneId, agentNames, currentPlayer, characterDetails);
     const state = await api.getState();
+    // P-0804-H 续：当前场景绑定地图（default_map 可能是字符串或对象 → 统一对象）
+    const sc = storeState.scenes.find((s: any) => s.scene_id === sceneId);
+    let sceneMap: any = null;
+    if (sc && sc.default_map) {
+      try { sceneMap = typeof sc.default_map === 'string' ? JSON.parse(sc.default_map) : sc.default_map; }
+      catch { sceneMap = null; }
+    }
     set({
       view: 'chat',
       agents: agentNames,
       sessionId: data.session_id,
       currentRound: 0,
+      currentSceneMap: sceneMap,
       messages: [],
       currentTasks: [],
       isRunning: false,
@@ -414,7 +476,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (result.agent_outputs && Array.isArray(result.agent_outputs)) {
         for (const out of result.agent_outputs) {
           if (out && out.agent_name) {
-            get().addAgentMsg(out.agent_name, out.content || '', out.track_id, out.track_label, out.track_mode);
+            // P-0814-G：双路径去重 —— 同步返回的 agent_outputs 与 SSE agent_output 事件同源，
+            // SSE 已先上屏（流式草稿结算或直接追加）时同步再追加会造成 AI 消息重复/批量出现。
+            // 同 (agent_name, content) 已在消息列表 → 跳过（SSE 通道已覆盖）；每轮读最新 store 防同响应内重复。
+            const content = String(out.content || '');
+            const dup = get().messages.some(m =>
+              m.role === 'agent' && m.name === out.agent_name && m.content === content);
+            if (dup) continue;
+            get().addAgentMsg(out.agent_name, content, out.track_id, out.track_label, out.track_mode);
           }
         }
       }
@@ -446,7 +515,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       werewolfPhase: 'day_discussion', werewolfRound: 1, werewolfPlayers: [],
       werewolfMyRole: '', werewolfWaitHuman: false, werewolfSessionId: '', werewolfAlive: [],
       werewolfVisible: {}, werewolfDiscussion: [], werewolfWinner: '', werewolfVoteCount: 0, werewolfApproval: '',
-      werewolfWitchVictim: '', werewolfRoleKey: '', scriptSessionId: '',
+      werewolfWitchVictim: '', werewolfRoleKey: '', scriptSessionId: '', scriptRoleKey: '',
+      scriptLocks: null, scriptPressEvents: [],
+      scriptTrust: 5, scriptMyVote: '',
       streamingByAgent: {}, streamPaused: false,
     });
   },
@@ -467,7 +538,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         werewolfPhase: 'day_discussion', werewolfRound: 1, werewolfPlayers: [], werewolfMyRole: '',
         werewolfSessionId: '', werewolfAlive: [], werewolfVisible: {}, werewolfDiscussion: [],
         werewolfWinner: '', werewolfVoteCount: 0, werewolfApproval: '', werewolfWitchVictim: '',
-        werewolfRoleKey: '', scriptSessionId: '',
+        werewolfRoleKey: '', scriptSessionId: '', scriptRoleKey: '',
+        scriptLocks: null, scriptPressEvents: [],
+        scriptTrust: 5, scriptMyVote: '',
         streamingByAgent: {}, streamPaused: false,
       } : {}),
     });
@@ -479,6 +552,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   setCurrentRound: (r) => set({ currentRound: r }),
+  /** P-0814-A/C：经典视图播放完毕自动推进标志（round_complete 置位；自动推进 effect 消费/新会话清除） */
+  setPlaybackArmed: (v) => set({ playbackArmed: v }),
   setCharStatus: (name, status) => set(s => ({ charStatuses: { ...s.charStatuses, [name]: status } })),
   setHistoryFilter: (name) => set({ historyFilter: name }),
   goHome: () => set({ view: 'home', messages: [], currentTasks: [] }),
@@ -533,6 +608,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   setScriptState: (s) => set({
     scriptState: s,
     ...(s?.phase ? { scriptPhase: s.phase } : {}),
+    ...(s?.role_key ? { scriptRoleKey: s.role_key } : {}),
+    ...(s?.player ? { currentPlayer: String(s.player), boundCharacterName: String(s.player) } : {}),
   }),
   setScriptPhase: (p) => set({ scriptPhase: p }),
   setScriptReveal: (r) => set({ scriptReveal: r }),
@@ -541,6 +618,38 @@ export const useAppStore = create<AppState>((set, get) => ({
     try { localStorage.setItem('scriptSessionId', v || ''); } catch { /* ignore */ }
     set({ scriptSessionId: v });
   },
+  /** P-0816-P2：剧本杀本人 roleKey（localStorage 镜像，供重连/讨论发言身份校验；🎭 扮演入口写入） */
+  setScriptRoleKey: (v) => {
+    try { localStorage.setItem('scriptRoleKey', v || ''); } catch { /* ignore */ }
+    set({ scriptRoleKey: v || '' });
+  },
+  setScriptVoteProgress: (v) => set({ scriptVoteProgress: v }),
+  setScriptGoal: (v) => set({ scriptGoal: v }),
+  /** P-0816-R：心锁状态写入（API-3 轮询 / SSE script_locks；locks 数组或 null） */
+  setScriptLocks: (v) => set({ scriptLocks: v }),
+  /** P-0816-R：质询事件追加（SSE script_press；按 message_id+pressed_by 去重，上限 100 防膨胀） */
+  addScriptPressEvent: (e) => set(s => {
+    if (!e || !e.target || !e.pressed_by) return {};
+    const key = `${String(e.message_id || '')}|${String(e.pressed_by)}`;
+    if (s.scriptPressEvents.some(p => `${String(p.message_id || '')}|${String(p.pressed_by)}` === key)) return {};
+    const events = [...s.scriptPressEvents, {
+      target: String(e.target),
+      pressed_by: String(e.pressed_by),
+      message_id: e.message_id ? String(e.message_id) : undefined,
+      contradiction: e.contradiction !== false,
+    }];
+    return { scriptPressEvents: events.length > 100 ? events.slice(-100) : events };
+  }),
+  /** P-0816-T（阶段三 U3）：信任度前端近似 —— 扣减/重置（下限 0；初始 5/5） */
+  setScriptTrust: (t) => set({ scriptTrust: Math.max(0, Math.min(5, Math.floor(t))) }),
+  setScriptMyVote: (suspect) => set({ scriptMyVote: suspect || '' }),
+  /** P-0816-M（对局页按原型重构）：讨论实时发言（script_speech SSE → 讨论主区 VN 流；上限 200 防膨胀） */
+  addScriptSpeechTurn: (t) => set(s => {
+    if (!t || !t.speaker || !t.message) return {};
+    const turns = [...s.scriptSpeechTurns, { speaker: String(t.speaker), message: String(t.message) }];
+    return { scriptSpeechTurns: turns.length > 200 ? turns.slice(-200) : turns };
+  }),
+  clearScriptSpeechTurns: () => set({ scriptSpeechTurns: [] }),
   /** P-0802-P4：设置已绑定角色名（「玩家本人角色」）——localStorage 镜像，client.ts 读镜像做绑定判断 */
   setBoundCharacterName: (v) => {
     try { localStorage.setItem('boundCharacterName', v || ''); } catch { /* ignore */ }
@@ -667,5 +776,4 @@ function stopPolling() {
     pollingTimeout = null;
   }
 }
-
 

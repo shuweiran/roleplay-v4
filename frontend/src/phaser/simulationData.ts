@@ -72,6 +72,81 @@ export interface SimGroup {
 export const WORLD_W = 1000;
 export const WORLD_H = 600;
 
+/**
+ * P-0813-G：接近提示触发距离（px）——玩家角色与 NPC 距离 < 该阈值时，
+ * 该 NPC 头顶显示「💬 对话」交互提示（点击进入对话；远离后消失）。
+ */
+export const APPROACH_DIST = 80;
+
+// ── P-0813-K：群接近判定阈值（px）──────────────────────────────
+/** 玩家与群任一成员的距离阈值：< 100px 视为靠近该对话群。 */
+export const GROUP_APPROACH_MEMBER_DIST = 100;
+/** 玩家与群中心（成员位置均值）的距离阈值：< 120px 视为靠近该对话群。 */
+export const GROUP_APPROACH_CENTER_DIST = 120;
+
+/**
+ * P-0813-K：计算玩家角色当前可加入（接近）的对话群名单（纯函数，供 Scene 渲染与冒烟测试共用）。
+ * - 玩家不在世界中 → 空数组；
+ * - 只统计「含 2+ 成员的活跃群」且玩家尚未加入的群（已在组内 → 是离开入口，不是加入提示）；
+ * - 距离判定：玩家与群任一成员距离 < {@link GROUP_APPROACH_MEMBER_DIST}
+ *   或 玩家与群中心（在场成员位置均值）距离 < {@link GROUP_APPROACH_CENTER_DIST}；
+ * - DYAD 对偶组（mode=DYAD，后端上限 2 必满）不提供加入提示（1v1 语义，P-0803-G 同规则）。
+ *
+ * @returns 可加入的群 id 数组（按 conversation-status 顺序）
+ */
+export function findApproachableGroups(
+  playerName: string,
+  agents: SimAgent[],
+  groups: SimGroup[],
+  memberDist: number = GROUP_APPROACH_MEMBER_DIST,
+  centerDist: number = GROUP_APPROACH_CENTER_DIST,
+): string[] {
+  if (!playerName) return [];
+  const p = agents.find(a => a.agentName === playerName);
+  if (!p) return [];
+  const pos = new Map(agents.filter(a => a && a.agentName).map(a => [a.agentName, a] as const));
+  const out: string[] = [];
+  for (const g of groups || []) {
+    if (!g || !g.id) continue;
+    if (g.mode === 'DYAD') continue;                    // 1v1 对偶组不提供加入入口
+    const members = (g.participants || []).filter(n => n && n !== playerName);
+    if (members.length < 2) continue;                   // 需 2+ 成员（正在对话的 AI 群）
+    if ((g.participants || []).includes(playerName)) continue; // 玩家已在组内 → 退出入口而非加入提示
+    // 群中心 = 在场成员位置均值
+    let sx = 0, sy = 0, cnt = 0;
+    let nearMember = false;
+    for (const name of members) {
+      const a = pos.get(name);
+      if (!a) continue;
+      sx += a.x; sy += a.y; cnt++;
+      if (Math.hypot(a.x - p.x, a.y - p.y) < memberDist) nearMember = true;
+    }
+    if (nearMember) { out.push(g.id); continue; }        // 任一成员 < 100px → 靠近
+    if (cnt > 0) {
+      const cx = sx / cnt, cy = sy / cnt;
+      if (Math.hypot(cx - p.x, cy - p.y) < centerDist) out.push(g.id); // 群中心 < 120px → 靠近
+    }
+  }
+  return out;
+}
+
+/**
+ * P-0813-G：计算玩家角色当前可交互（接近）的 NPC 名单（纯函数，供 Scene 渲染与冒烟测试共用）。
+ * - 玩家不在世界中（导演模式 / 快照未含玩家）→ 空数组（无提示）；
+ * - 只统计与玩家距离 < dist 的 agent，玩家自身排除。
+ */
+export function findApproachable(playerName: string, agents: SimAgent[], dist: number = APPROACH_DIST): string[] {
+  if (!playerName) return [];
+  const p = agents.find(a => a.agentName === playerName);
+  if (!p) return [];
+  const out: string[] = [];
+  for (const a of agents) {
+    if (!a || !a.agentName || a.agentName === playerName) continue;
+    if (Math.hypot(a.x - p.x, a.y - p.y) < dist) out.push(a.agentName);
+  }
+  return out;
+}
+
 export const AGENT_COLORS = [
   '#38bdf8', '#f472b6', '#a78bfa', '#34d399', '#fb923c', '#f87171', '#e879f9', '#2dd4bf',
 ];

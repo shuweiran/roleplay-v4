@@ -15,12 +15,14 @@ export interface MiniMapProps {
   player: { x: number; y: number } | null;
   /** 已搜证 zone id 列表（绿点；未搜证金点） */
   searched: string[];
+  /** P-0817-G：当前房间 id（房间模式高亮；缺省不高亮） */
+  currentRoom?: string;
 }
 
 /** 小地图画布宽（px）；高按地图宽高比自适应（60~110px） */
 const MM_W = 140;
 
-export function MiniMap({ map, player, searched }: MiniMapProps) {
+export function MiniMap({ map, player, searched, currentRoom }: MiniMapProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -41,10 +43,11 @@ export function MiniMap({ map, player, searched }: MiniMapProps) {
     // 房间（浅蓝矩形）
     for (const r of map.rooms) {
       if (r.w <= 0 || r.h <= 0) continue;
-      ctx.fillStyle = 'rgba(56, 189, 248, 0.22)';
+      const active = currentRoom === r.id;
+      ctx.fillStyle = active ? 'rgba(255, 209, 102, 0.45)' : 'rgba(56, 189, 248, 0.22)';
       ctx.fillRect(r.x * s, r.y * s, r.w * s, r.h * s);
-      ctx.strokeStyle = 'rgba(56, 189, 248, 0.55)';
-      ctx.lineWidth = 1;
+      ctx.strokeStyle = active ? '#ffd166' : 'rgba(56, 189, 248, 0.55)';
+      ctx.lineWidth = active ? 2 : 1;
       ctx.strokeRect(r.x * s + 0.5, r.y * s + 0.5, r.w * s, r.h * s);
     }
     // 走廊（石板灰线，可选）
@@ -81,7 +84,7 @@ export function MiniMap({ map, player, searched }: MiniMapProps) {
       ctx.lineWidth = 1.5;
       ctx.stroke();
     }
-  }, [map, player, searched]);
+  }, [map, player, searched, currentRoom]);
 
   return (
     <canvas

@@ -15,12 +15,46 @@ export interface ScriptMap {
   width: number;
   height: number;
   tileset?: { src?: string; first_gid?: number; tile_count?: number };
-  layers: { ground: number[][]; collision: number[][] };
+  layers: {
+    ground: number[][];
+    collision: number[][];
+    /** v0.2（P-0814-F）：Front 层静态装饰类型名二维数组（可 null 元素，与 ground 同尺寸） */
+    objects?: (string | null)[][];
+    /** v0.2：AlwaysFront 前景遮罩二维数组（可 null 元素，永远盖住角色） */
+    overlay?: (string | null)[][];
+  };
   rooms: MapRoom[];
   corridors: MapCorridor[];
   zones: MapZone[];
   spawn_points: MapSpawnPoint[];
+  /** v0.2：每格属性字典（键 "x,y"，值任意属性字典；water/blocked 等不做白名单） */
+  tileProps?: Record<string, Record<string, unknown>>;
+  /** v0.2：显式装饰/交互物（id 全局唯一、type 简单英文标识符、tile=[x,y]） */
+  decor?: MapDecorItem[];
+  /** v0.2：生成器指示（键=类别名，值=坐标数组，如 {"grass":[[2,2]]}） */
+  spawnMarkers?: Record<string, number[][]>;
+  /** v0.2：传送点（from=[x,y]，to=[mapId字符串,x,y]；本批不渲染，契约透传） */
+  warps?: MapWarp[];
+  /** P-0817-G：房间出口表（走门切换数据源；缺失/空 = 非房间模式） */
+  exits?: MapExit[];
   generator?: { kind?: string; seed?: number; model?: string; note?: string };
+}
+
+/** v0.2 decor 条目 */
+export interface MapDecorItem {
+  id: string;
+  type: string;
+  tile: [number, number];
+  state?: Record<string, unknown>;
+  onInteract?: Record<string, unknown>;
+  once?: boolean;
+  radius?: number;
+}
+
+/** v0.2 warps 条目（场景切换数据表；渲染层透传） */
+export interface MapWarp {
+  from: [number, number];
+  to: [string, number, number];
 }
 
 export interface MapRoom {
@@ -56,6 +90,15 @@ export interface MapSpawnPoint {
   type: string; // player / npc
   x: number;
   y: number;
+}
+
+/** P-0817-G（房间模式）：房间出口表（契约 v0.2 扩展键 exits[]，MapExits 确定性推导） */
+export interface MapExit {
+  id: string;
+  from: string;
+  to: string;
+  side?: string; // top / bottom / left / right
+  door: [number, number];
 }
 
 /* ── 宽容解析（对齐契约 §3：缺省兜底、不崩） ── */
@@ -126,6 +169,76 @@ export function normalizeMap(raw: unknown): ScriptMap | null {
     return { id: str(cc.id, 'cor'), from: str(cc.from, ''), to: str(cc.to, ''), points: pts } as MapCorridor;
   });
 
+  /* ── v0.2 可选键宽容解析（对齐契约 §7：缺失一律兜底为空，v1 数据零破坏） ── */
+
+  // layers.objects / layers.overlay：字符串二维数组（元素可 null），非数组 → undefined（渲染层跳过）
+  const strGrid = (v: unknown): (string | null)[][] | undefined => {
+    if (!Array.isArray(v)) return undefined;
+    const out: (string | null)[][] = [];
+    for (const row of v) {
+      if (!Array.isArray(row)) return undefined;
+      out.push(row.map(cell => (cell === undefined || cell === null ? null : String(cell))));
+    }
+    return out;
+  };
+
+  // tileProps：键 "x,y" → 值对象字典（宽容透传，不做白名单）；非对象 → 丢弃该键
+  const tileProps: Record<string, Record<string, unknown>> = {};
+  if (m.tileProps && typeof m.tileProps === 'object') {
+    for (const [k, v] of Object.entries(m.tileProps as Record<string, unknown>)) {
+      if (v && typeof v === 'object') tileProps[k] = v as Record<string, unknown>;
+    }
+  }
+
+  // decor：{id,type,tile:[x,y],state?,onInteract?,once?,radius?} 宽容解析
+  const decor = listOf(m.decor).map(d => {
+    const dd = d as Record<string, unknown>;
+    const tile = Array.isArray(dd.tile) && dd.tile.length >= 2 ? [Number(dd.tile[0]), Number(dd.tile[1])] : [0, 0];
+    return {
+      id: str(dd.id, 'decor'),
+      type: str(dd.type, 'unknown'),
+      tile: tile as [number, number],
+      state: dd.state && typeof dd.state === 'object' ? dd.state : undefined,
+      onInteract: dd.onInteract && typeof dd.onInteract === 'object' ? dd.onInteract : undefined,
+      once: dd.once === undefined ? undefined : Boolean(dd.once),
+      radius: dd.radius !== undefined ? Number(dd.radius) : undefined,
+    } as MapDecorItem;
+  });
+
+  // spawnMarkers：键=类别名，值=[[x,y],...] 坐标数组（非数对丢弃）
+  const spawnMarkers: Record<string, number[][]> = {};
+  if (m.spawnMarkers && typeof m.spawnMarkers === 'object') {
+    for (const [cat, pts] of Object.entries(m.spawnMarkers as Record<string, unknown>)) {
+      if (!Array.isArray(pts)) continue;
+      const valid = (pts as unknown[]).filter(p => Array.isArray(p) && p.length >= 2).map(p => [Number((p as unknown[])[0]), Number((p as unknown[])[1])]);
+      if (valid.length > 0) spawnMarkers[cat] = valid;
+    }
+  }
+
+  // warps：{from:[x,y], to:[mapId,x,y]} 宽容解析
+  const warps = listOf(m.warps).map(w => {
+    const ww = w as Record<string, unknown>;
+    const from = Array.isArray(ww.from) && ww.from.length >= 2 ? [Number((ww.from as unknown[])[0]), Number((ww.from as unknown[])[1])] : [0, 0];
+    const to = Array.isArray(ww.to) && ww.to.length >= 3 ? [String((ww.to as unknown[])[0]), Number((ww.to as unknown[])[1]), Number((ww.to as unknown[])[2])] : ['', 0, 0];
+    return { from: from as [number, number], to: to as [string, number, number] } as MapWarp;
+  });
+
+  // P-0817-G：exits 宽容解析（{id, from, to, side?, door:[x,y]}；door 非法或 from/to 缺失 → 跳过）
+  const exits = listOf(m.exits).map(e => {
+    const ee = e as Record<string, unknown>;
+    const door = Array.isArray(ee.door) && ee.door.length >= 2
+      ? [Number((ee.door as unknown[])[0]), Number((ee.door as unknown[])[1])]
+      : null;
+    if (!door) return null;
+    return {
+      id: str(ee.id, 'exit'),
+      from: str(ee.from, ''),
+      to: str(ee.to, ''),
+      side: ee.side === undefined ? undefined : String(ee.side),
+      door: door as [number, number],
+    } as MapExit;
+  }).filter((e): e is MapExit => !!e && !!e.from && !!e.to);
+
   return {
     map_version: Number(m.map_version) || 1,
     map_id: str(m.map_id, 'map'),
@@ -135,11 +248,21 @@ export function normalizeMap(raw: unknown): ScriptMap | null {
     width: num(m.width, ground[0]?.length ?? 0),
     height: num(m.height, ground.length),
     tileset: (m.tileset && typeof m.tileset === 'object' ? m.tileset : undefined) as ScriptMap['tileset'],
-    layers: { ground, collision },
+    layers: {
+      ground,
+      collision,
+      objects: strGrid(layers.objects),
+      overlay: strGrid(layers.overlay),
+    },
     rooms,
     corridors,
     zones,
     spawn_points: spawns,
+    tileProps: Object.keys(tileProps).length > 0 ? tileProps : undefined,
+    decor: decor.length > 0 ? decor : undefined,
+    spawnMarkers: Object.keys(spawnMarkers).length > 0 ? spawnMarkers : undefined,
+    warps: warps.length > 0 ? warps : undefined,
+    exits: exits.length > 0 ? exits : undefined,
     generator: (m.generator && typeof m.generator === 'object' ? m.generator : undefined) as ScriptMap['generator'],
   };
 }

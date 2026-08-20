@@ -20,6 +20,13 @@ interface SessionMessages {
   round_logs: any[];
 }
 
+interface ScriptHistoryMessage {
+  speaker?: string;
+  message?: string;
+  round?: string | number;
+  system?: boolean;
+}
+
 export function HistoryPanel({ onClose }: { onClose: () => void }) {
   const store = useAppStore();
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
@@ -28,10 +35,29 @@ export function HistoryPanel({ onClose }: { onClose: () => void }) {
   const [sessionMessages, setSessionMessages] = useState<SessionMessages | null>(null);
   const [loadingSession, setLoadingSession] = useState(false);
   const [loadError, setLoadError] = useState('');
+  const [scriptHistory, setScriptHistory] = useState<any | null>(null);
+  const [loadingScriptHistory, setLoadingScriptHistory] = useState(false);
 
   useEffect(() => {
     loadSessions();
   }, []);
+
+  // P-0819-N：一般模式已有历史抽屉也服务剧本杀本局复盘。
+  // 剧本杀讨论不走 RouterService 历史表，改从同一 role_key 视角读取脱敏 status，
+  // 复用历史抽屉的消息预览样式，避免再造一套「剧本历史」入口。
+  useEffect(() => {
+    if (store.mode !== 'script' || !store.currentPlayer) {
+      setScriptHistory(null);
+      return;
+    }
+    let alive = true;
+    setLoadingScriptHistory(true);
+    api.scriptStatus(store.currentPlayer, store.scriptRoleKey)
+      .then(data => { if (alive) setScriptHistory(data); })
+      .catch(() => { if (alive) setScriptHistory(null); })
+      .finally(() => { if (alive) setLoadingScriptHistory(false); });
+    return () => { alive = false; };
+  }, [store.mode, store.currentPlayer, store.scriptRoleKey]);
 
   const loadSessions = async () => {
     setLoading(true);
@@ -88,11 +114,24 @@ export function HistoryPanel({ onClose }: { onClose: () => void }) {
   };
 
   const currentSessionId = store.sessionId;
+  // GameBridge 恢复剧本时会先 loadState 再回写 mode；期间 scriptSessionId 已存在，
+  // 仅依赖 mode 会短暂误显示一般模式历史列表，导致剧本杀右栏联动失效。
+  const isScriptMode = store.mode === 'script' || !!store.scriptSessionId;
+  const scriptMessages: ScriptHistoryMessage[] = Array.isArray(scriptHistory?.discussion)
+    ? scriptHistory.discussion
+        .map((m: any) => ({
+          speaker: String(m?.speaker || m?.name || '系统'),
+          message: String(m?.message || m?.content || ''),
+          round: m?.round,
+          system: m?.speaker === 'system' || m?.role === 'system',
+        }))
+        .filter((m: ScriptHistoryMessage) => m.message)
+    : [];
 
   return (
     <div className="history-panel">
       <div className="history-panel-header">
-        <h3>📋 历史会话</h3>
+        <h3>{isScriptMode ? '📜 本局历史' : '📋 历史会话'}</h3>
         <button className="btn btn-small" onClick={onClose}>✕</button>
       </div>
 
@@ -102,7 +141,48 @@ export function HistoryPanel({ onClose }: { onClose: () => void }) {
         </div>
       )}
 
-      {/* Session list */}
+      {isScriptMode ? (
+        <div className="history-session-list">
+          <div className="history-list-header">
+            <span>{scriptHistory?.name || '剧本杀对局'}</span>
+            <button
+              className="btn btn-small"
+              onClick={() => {
+                setLoadingScriptHistory(true);
+                api.scriptStatus(store.currentPlayer, store.scriptRoleKey)
+                  .then(setScriptHistory)
+                  .catch(() => setLoadError('本局历史加载失败'))
+                  .finally(() => setLoadingScriptHistory(false));
+              }}
+              disabled={loadingScriptHistory}
+            >{loadingScriptHistory ? '⟳' : '↻'}</button>
+          </div>
+          {loadingScriptHistory && !scriptHistory ? (
+            <div className="history-empty">加载本局记录中...</div>
+          ) : (
+            <>
+              <div className="history-session-meta" style={{ padding: '6px 10px', gap: 8 }}>
+                <span>第 {scriptHistory?.round ?? 1} 轮</span>
+                <span>{scriptHistory?.phase || '准备'}阶段</span>
+                <span>{scriptMessages.length} 条发言</span>
+                <span>线索 {Array.isArray(scriptHistory?.clues) ? scriptHistory.clues.length : 0}</span>
+              </div>
+              <div className="history-preview-messages">
+                {scriptMessages.length === 0 ? (
+                  <div className="history-empty">本局暂时没有可复盘的发言</div>
+                ) : scriptMessages.slice(-40).map((msg, i) => (
+                  <div key={`${msg.speaker}-${msg.round}-${i}`} className={`history-preview-msg ${msg.system ? 'role-system' : 'role-assistant'}`}>
+                    <span className="history-preview-name">{msg.speaker}{msg.round ? ` · ${msg.round}` : ''}</span>
+                    <span className="history-preview-content">{msg.message}</span>
+                  </div>
+                ))}
+                {scriptMessages.length > 40 && <div className="history-preview-more">... 共 {scriptMessages.length} 条发言（显示最近40条）</div>}
+              </div>
+            </>
+          )}
+        </div>
+      ) : (
+      /* Session list */
       <div className="history-session-list">
         <div className="history-list-header">
           <span>会话列表</span>
@@ -142,9 +222,10 @@ export function HistoryPanel({ onClose }: { onClose: () => void }) {
           })
         )}
       </div>
+      )}
 
       {/* Message preview for selected session */}
-      {selectedSession && (
+      {!isScriptMode && selectedSession && (
         <div className="history-message-preview">
           <div className="history-preview-header">
             <span>消息预览</span>
