@@ -28,6 +28,7 @@ from .routes_characters import router as characters_router
 from .routes_scenes import router as scenes_router
 from .routes_round import router as round_router
 from .routes_session import router as session_router
+from .routes_director import router as director_router
 from .routes_sse import broadcast_event, router as sse_router
 from .routes_history import router as history_router
 from .routes_auth import router as auth_router
@@ -59,6 +60,7 @@ async def lifespan(app: FastAPI):
     app.state.session_manager = session_manager
     app.state.monitor = monitor
     app.state.router = None  # Created on first init
+    app.state.director_sessions = {}  # preflight/runtime controller state
     app.state.sse_broadcast = broadcast_event  # SSE hook for Router
 
     yield
@@ -112,6 +114,7 @@ def create_app(config: AppConfig = None) -> FastAPI:
     app.include_router(scenes_router)
     app.include_router(round_router)
     app.include_router(session_router)
+    app.include_router(director_router)
     app.include_router(sse_router)
     app.include_router(history_router)
     app.include_router(auth_router)
@@ -148,4 +151,3 @@ def create_app(config: AppConfig = None) -> FastAPI:
         return {"message": "Roleplay v4 API 鈥?Frontend not found. Run Vite dev server or build the frontend."}
 
     return app
-
