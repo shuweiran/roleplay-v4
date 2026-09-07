@@ -1,6 +1,7 @@
 import asyncio
 import unittest
 
+from backend.api.routes_director import _explicit_entry_confirmation
 from backend.core.director_agent import DirectorAgent
 
 
@@ -69,6 +70,12 @@ class DirectorAgentTests(unittest.TestCase):
             s.add_message("user", f"m{i}")
         self.assertLessEqual(len(s.messages), 60)
         self.assertEqual(s.messages[-1].content, "m99")
+
+    def test_character_entry_is_not_game_confirmation(self):
+        self.assertFalse(_explicit_entry_confirmation("让兔子进入场景，鲸鱼先等等"))
+        self.assertFalse(_explicit_entry_confirmation("把鲸鱼拉进来"))
+        self.assertTrue(_explicit_entry_confirmation("确认进入场景"))
+        self.assertTrue(_explicit_entry_confirmation("就这样吧，开始"))
 
 
 if __name__ == "__main__":
