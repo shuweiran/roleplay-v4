@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Request
@@ -57,6 +58,20 @@ def _model_dict(model: BaseModel) -> dict:
     return model.dict()
 
 
+def _explicit_entry_confirmation(text: str) -> bool:
+    """Only player-level confirmation may unlock scene creation.
+
+    A phrase such as “让兔子进入场景” is a stage mutation, not permission to
+    start the whole game.  This guard sits outside the LLM/fallback parser so a
+    model mistake cannot accidentally bypass the preflight gate.
+    """
+    text = str(text or "").strip()
+    return bool(re.search(
+        r"(?:确认(?:进入|开始|进场)|就这样(?:吧)?|按这个来|开始吧|正式开始|可以开始|可以进场|进入游戏)",
+        text,
+    ))
+
+
 def _sync_runtime_stage(request: Request, session: DirectorSession) -> None:
     """Make DirectorSession.onstage the authoritative scheduler roster.
 
@@ -72,12 +87,10 @@ def _sync_runtime_stage(request: Request, session: DirectorSession) -> None:
     allowed = set(session.onstage)
     player_name = session.player_name
 
-    # Remove offstage NPCs from the active scheduler roster.
     for name in list(r.agents.keys()):
         if name not in allowed and name != player_name:
             del r.agents[name]
 
-    # Recreate NPCs that have been brought back on stage.
     for name in session.onstage:
         if name == player_name or name in r.agents:
             continue
@@ -92,7 +105,6 @@ def _sync_runtime_stage(request: Request, session: DirectorSession) -> None:
             monitor=r.monitor,
         )
 
-    # Stable controller facts are injected as scene context for Arbiter/Agents.
     base_scene = getattr(r, "_director_base_scene_description", "") or session.scene_description
     r.scene_description = f"{base_scene}\n\n【主控权威状态】\n{session.state_summary()}".strip()
 
@@ -146,7 +158,24 @@ async def preflight_chat(preflight_id: str, req: DirectorChatRequest, request: R
     session = _sessions(request).get(preflight_id)
     if session is None:
         raise HTTPException(status_code=404, detail="主控预备会话不存在或已失效")
+
+    was_confirmed = session.confirmed
     result = await _agent(request).chat(session, req.text)
+
+    # Defense in depth: only explicit player confirmation may open the gate.
+    if not was_confirmed and session.confirmed and not _explicit_entry_confirmation(req.text):
+        session.confirmed = False
+        result["applied"] = [x for x in result.get("applied", []) if x != "已确认进场配置"]
+        result["state"] = session.to_dict()
+        result["reply"] = (
+            "已处理角色/场景配置，但尚未确认正式进场。\n"
+            f"{session.state_summary()}\n"
+            "确认无误后请说“确认进入场景”或点击“确认并进入”。"
+        )
+        # Replace the just-added assistant history item with the guarded reply.
+        if session.messages and session.messages[-1].role == "assistant":
+            session.messages[-1].content = result["reply"]
+
     return {"status": "ok", **result}
 
 
@@ -155,7 +184,7 @@ async def runtime_director_chat(req: DirectorChatRequest, request: Request):
     """Talk to the same director after entering the scene.
 
     Mutations are applied to DirectorSession first, then synchronised into the
-    scheduler roster.  The response is generated only after that sync.
+    scheduler roster. The HTTP response is returned only after that sync.
     """
     r = get_router(request)
     session: Optional[DirectorSession] = getattr(r, "_director_session", None)
@@ -165,8 +194,6 @@ async def runtime_director_chat(req: DirectorChatRequest, request: Request):
     result = await _agent(request).chat(session, req.text)
     _sync_runtime_stage(request, session)
 
-    # Persist controller conversation separately from role speech, and mirror a
-    # concise verified state marker into roleplay memory so agents share facts.
     try:
         from ..models.domain import Message
         marker = Message(
